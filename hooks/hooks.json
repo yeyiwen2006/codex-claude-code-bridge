@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\command-hook.mjs\"",
+            "commandWindows": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts','command-hook.mjs')).href)\"",
             "timeout": 3600
           }
         ]
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\command-hook.mjs\"",
+            "commandWindows": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts','command-hook.mjs')).href)\"",
             "timeout": 3
           }
         ]
