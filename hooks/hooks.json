@@ -1,0 +1,29 @@
+{
+  "description": "Deterministic /claude commands and private clipboard-image cleanup.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\command-hook.mjs\"",
+            "timeout": 3600
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\scripts\\command-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

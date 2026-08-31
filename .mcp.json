@@ -1,0 +1,69 @@
+{
+  "mcpServers": {
+    "claude_code_bridge": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./server/index.mjs"
+      ],
+      "cwd": ".",
+      "enabled": true,
+      "default_tools_approval_mode": "prompt",
+      "tools": {
+        "claude_code_health": {
+          "approval_mode": "approve"
+        },
+        "claude_code_authorize_directory": {
+          "approval_mode": "prompt"
+        },
+        "claude_code_run": {
+          "approval_mode": "prompt"
+        }
+      },
+      "env_vars": [
+        "PATH",
+        "PATHEXT",
+        "HOME",
+        "USER",
+        "USERNAME",
+        "LOGNAME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "SYSTEMROOT",
+        "COMSPEC",
+        "SHELL",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_GIT_BASH_PATH",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_BRIDGE_COMMAND",
+        "CLAUDE_CODE_BRIDGE_COMMAND_ARGS",
+        "CLAUDE_CODE_BRIDGE_MAX_OUTPUT_BYTES"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 3600
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "claude-code-bridge",
+  "version": "0.2.0",
+  "description": "Run local Claude Code from deterministic Codex commands, with guarded MCP fallback and a multi-image clipboard queue.",
+  "author": {
+    "name": "Claude Code Bridge contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "mcp",
+    "coding-agent"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Claude Code Bridge",
+    "shortDescription": "Deterministic /claude commands with multi-image handoff.",
+    "longDescription": "A local bridge that intercepts explicit /claude commands before the Codex model, invokes an already-installed Claude Code CLI, queues multiple Windows clipboard images without manual saving, controls models and permissions, and keeps an MCP/Skill fallback for model-directed use.",
+    "developerName": "Claude Code Bridge contributors",
+    "category": "DeveloperTools",
+    "capabilities": [
+      "Deterministic commands",
+      "Multi-image clipboard queue",
+      "Tool calling",
+      "File editing",
+      "Claude plugins and Skills"
+    ],
+    "defaultPrompt": [
+      "/claude help",
+      "/claude access allow .",
+      "/claude status"
+    ]
+  }
+}

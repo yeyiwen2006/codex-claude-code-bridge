@@ -1,0 +1,17 @@
+{
+  "name": "claude-code-bridge",
+  "version": "0.2.0",
+  "description": "A dependency-free deterministic command and MCP bridge from Codex to local Claude Code.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node ./scripts/check.mjs && node --test",
+    "register": "node ./scripts/register-personal-marketplace.mjs",
+    "unregister": "node ./scripts/unregister-personal-marketplace.mjs --yes"
+  },
+  "license": "MIT"
+}
