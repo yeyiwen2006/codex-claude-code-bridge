@@ -21,7 +21,12 @@ const hooks = await readJson("hooks/hooks.json");
 const packageManifest = await readJson("package.json");
 
 assert.equal(plugin.name, "claude-code-bridge");
-assert.equal(plugin.version, packageManifest.version, "package and plugin versions must match");
+const escapedPackageVersion = packageManifest.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+assert.match(
+  plugin.version,
+  new RegExp(`^${escapedPackageVersion}(?:\\+codex\\.\\d{14})?$`),
+  "plugin version must match the package version, optionally with a Codex cachebuster",
+);
 assert.equal(plugin.mcpServers, "./.mcp.json");
 assert.equal(plugin.skills, "./skills/");
 assert.ok(Array.isArray(plugin.interface.defaultPrompt));
