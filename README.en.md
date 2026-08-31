@@ -26,6 +26,23 @@ The current public Codex hook API cannot create a normal assistant bubble. Comma
 
 The plugin also exposes `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. These are for cases where the user explicitly wants the Codex model to coordinate Claude; they are not the implementation behind `/claude` commands.
 
+## Codex App and Codex CLI
+
+### Codex App
+
+The Codex App composer can explicitly select Claude Code Bridge through the plugin picker or an `@` mention. The selected plugin name appears above the composer. That label is useful for the natural-language MCP/Skill fallback and should be treated as an explicit selection for the current request, not as a permanent switch for the entire chat.
+
+- Direct `/claude ...` commands do not need the Claude Code Bridge label on every message. As long as the plugin is installed and enabled, the deterministic hook recognizes standalone messages that begin with `/claude`; leaving the label selected is harmless.
+- For an ordinary natural-language request where the Codex model must explicitly coordinate Claude, select Claude Code Bridge for that request or invoke it with `@`. Do not rely on a label from an earlier message as a permanent chat setting; select it again whenever explicit plugin routing matters.
+- The current Codex App does not expose the CLI `/hooks` command. Install, enable, and explicitly select plugins through the App's Plugins UI or composer. If the App presents a hook review or trust prompt, inspect it and approve it through that UI.
+- Start a new Codex task after installing or updating the plugin so the task loads the new hooks, Skill, and MCP configuration.
+
+### Codex CLI
+
+Codex CLI does not have the App's composer plugin label. Use `/plugins` to confirm the plugin is installed and enabled, start a new session after installation or update, then use `/hooks` to review and trust the bundled `UserPromptSubmit` and `SessionEnd` hooks. After that, enter `/claude ...` directly.
+
+See the [OpenAI plugin documentation](https://learn.chatgpt.com/docs/plugins) and [Codex hook documentation](https://learn.chatgpt.com/docs/hooks).
+
 ## Direct multi-image handoff
 
 `UserPromptSubmit` receives the prompt text but not the current uncommitted image attachments. The bridge therefore captures the same image data from the Windows clipboard after the user pastes into the Codex composer.
@@ -189,7 +206,22 @@ node "$env:USERPROFILE\plugins\claude-code-bridge\scripts\register-personal-mark
 codex plugin add claude-code-bridge@personal --json
 ```
 
-Then start a new Codex task, use `/hooks` to review and trust the plugin hooks, run `/claude status`, and authorize the specific project with `/claude access allow .`.
+### Use in the Codex App
+
+1. Confirm in the App's Plugins UI that Claude Code Bridge is installed and enabled.
+2. Start a new Codex task inside the project that Claude should inspect or modify, so its hooks, Skill, and MCP server load at task startup.
+3. The App has no `/hooks` command. If it presents a hook review or trust prompt, verify that the source is Claude Code Bridge and approve it through the UI.
+4. The direct command path does not require selecting the plugin label on every message. Run `/claude status` to verify the local CLI and authentication.
+5. Run `/claude access allow .` to authorize the task's actual working directory.
+6. Select Claude Code Bridge in the composer, or use `@`, only for the natural-language MCP/Skill fallback. Select it again for each request where explicit plugin routing matters.
+
+### Use in Codex CLI
+
+1. Start a new Codex session.
+2. Run `/plugins` and confirm that `claude-code-bridge@personal` is installed and enabled.
+3. Run `/hooks` to review and trust the bundled `UserPromptSubmit` and `SessionEnd` hooks.
+4. Run `/claude status` to verify the local CLI and authentication.
+5. From the target project directory, run `/claude access allow .`.
 
 Update:
 

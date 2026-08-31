@@ -28,6 +28,23 @@ Codex 当前公开 Hook 输出接口不能创建普通助手气泡，因此命�
 
 插件仍提供 `claude_code_health`、`claude_code_authorize_directory`、`claude_code_plan` 和 `claude_code_run`，供用户明确要求 Codex 模型协调 Claude 时使用。这条路径会使用 Codex 模型，不是 `/claude` 命令的默认实现。
 
+## Codex App 与 Codex CLI
+
+### Codex App
+
+Codex App 的输入框可以通过插件选择器或 `@` 显式选择 Claude Code Bridge。选中后，输入框上方会显示插件名称。这个标签适合自然语言的 MCP/Skill 兼容路径，应把它视为当前请求的显式插件选择，而不是永久切换整个会话的执行引擎。
+
+- 直接发送 `/claude ...` 命令时，不需要每条消息都选择或携带 Claude Code Bridge 标签。只要插件已经安装并启用，确定性 Hook 就会识别以 `/claude` 开头的独立消息；标签存在也不会影响命令。
+- 使用普通自然语言并希望 Codex 模型明确协调 Claude 时，可以为该请求选择 Claude Code Bridge，或用 `@` 显式调用它。不要依赖之前某条消息的标签作为永久会话设置；需要强制指定插件的自然语言请求应再次选择。
+- 当前 Codex App 不提供 CLI 的 `/hooks` 命令。插件安装、启用和显式选择在 App 的 Plugins 界面或输入框中完成；如果 App 显示 Hook 审查或信任提示，按界面提示核对后允许即可。
+- 安装或更新插件后应新建一个 Codex 任务，使新的 Hook、Skill 和 MCP 配置在任务启动时加载。
+
+### Codex CLI
+
+Codex CLI 没有 App 输入框中的插件标签。使用 `/plugins` 检查插件已经安装并启用，安装或更新后启动新会话，再用 `/hooks` 审查并信任插件携带的 `UserPromptSubmit` 和 `SessionEnd` Hook。之后直接输入 `/claude ...`。
+
+参见 [OpenAI 插件文档](https://learn.chatgpt.com/docs/plugins) 和 [Codex Hook 文档](https://learn.chatgpt.com/docs/hooks)。
+
 ## 多图直传
 
 Codex 的 `UserPromptSubmit` Hook 只公开当前提示词文字，不公开本次尚未提交的图片附件。因此插件不尝试解析不稳定的 Codex 会话文件，而是读取用户刚刚粘贴图片时仍在 Windows 剪贴板中的原始数据。
@@ -255,12 +272,22 @@ codex plugin add claude-code-bridge@personal --json
 
 个人 marketplace 文件位于 `~/.agents/plugins/marketplace.json`。注册脚本只添加或更新本插件条目，保留其他条目，并在覆盖现有 marketplace 前创建备份。
 
-安装后：
+#### 在 Codex App 中使用
 
-1. 新建一个 Codex 任务，让插件 Hook、Skill 和 MCP 服务器在启动时加载。
-2. 使用 `/hooks` 审查并信任插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。
-3. 输入 `/claude status` 检查 Claude CLI 和认证。
-4. 在目标项目里输入 `/claude access allow .`。
+1. 在 App 的 Plugins 界面确认 Claude Code Bridge 已安装并启用。
+2. 在真正要交给 Claude 处理的项目中新建一个 Codex 任务，让 Hook、Skill 和 MCP 服务器在启动时加载。
+3. App 没有 `/hooks` 命令。如果界面显示 Hook 审查或信任提示，核对来源为 Claude Code Bridge 后按提示允许。
+4. 直接命令路径无需在每条消息上选择插件标签；输入 `/claude status` 检查 Claude CLI 和认证。
+5. 输入 `/claude access allow .` 授权当前任务的实际工作目录。
+6. 只有在使用普通自然语言的 MCP/Skill 兼容路径时，才需要从输入框选择 Claude Code Bridge 或用 `@` 显式调用；需要强制指定时应针对该请求重新选择。
+
+#### 在 Codex CLI 中使用
+
+1. 启动一个新的 Codex 会话。
+2. 输入 `/plugins`，确认 `claude-code-bridge@personal` 已安装并启用。
+3. 输入 `/hooks`，审查并信任插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。
+4. 输入 `/claude status` 检查 Claude CLI 和认证。
+5. 在目标项目目录中输入 `/claude access allow .`。
 
 ### 更新
 
