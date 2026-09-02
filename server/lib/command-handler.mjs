@@ -562,6 +562,7 @@ async function executeCommand(command, context) {
       return [
         `Claude Code：${health.installed ? health.version : "未找到"}`,
         `认证：${health.authenticated ? "已登录" : "未登录或无法确认"}`,
+        `端点：${health.custom_endpoint ? "自定义 ANTHROPIC_BASE_URL" : "Claude 默认端点"}`,
         `目录：${authorization}`,
         `图片队列：${state.images.length} 张`,
         `后台任务：${jobStatus}`,

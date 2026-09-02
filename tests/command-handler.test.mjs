@@ -85,6 +85,7 @@ test("intercepts commands, queues multiple images in order, and runs without a C
       installed: true,
       authenticated: true,
       version: "9.9.9 (Claude Code)",
+      custom_endpoint: true,
     }),
     getClaudePluginInventory: async () => [],
     startClaudeJob: async (request) => {
@@ -125,6 +126,7 @@ test("intercepts commands, queues multiple images in order, and runs without a C
   assert.equal(await submit("普通 Codex 消息"), null);
   assert.match((await submit("/claude help")).reason, /不调用 Codex 模型/);
   assert.match((await submit("/claude access allow .")).reason, /已授权目录/);
+  assert.match((await submit("/claude status")).reason, /自定义 ANTHROPIC_BASE_URL/);
   assert.match((await submit("/claude config set permission manual")).reason, /permission: manual/);
 
   assert.match((await submit("/claude image add")).reason, /本次加入 2 张图片/);

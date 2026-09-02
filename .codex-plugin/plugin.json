@@ -1,6 +1,6 @@
 {
   "name": "codex-claude-code-bridge",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Run Claude Code from deterministic Codex commands with native runtime permissions, visible conversation inheritance, and multi-image clipboard handoff.",
   "author": {
     "name": "Codex Claude Code Bridge contributors"

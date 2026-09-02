@@ -17,7 +17,7 @@ import {
 } from "./lib/validation.mjs";
 
 const SERVER_NAME = "codex-claude-code-bridge";
-const SERVER_VERSION = "0.3.2";
+const SERVER_VERSION = "0.3.3";
 const FALLBACK_PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",

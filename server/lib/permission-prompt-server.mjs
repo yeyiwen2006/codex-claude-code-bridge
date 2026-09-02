@@ -120,7 +120,7 @@ async function handle(message) {
     return response(message.id, {
       protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
       capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: "codex-claude-code-bridge-permission", version: "0.3.2" },
+      serverInfo: { name: "codex-claude-code-bridge-permission", version: "0.3.3" },
     });
   }
   if (message.method === "notifications/initialized" || message.method === "notifications/cancelled") return undefined;

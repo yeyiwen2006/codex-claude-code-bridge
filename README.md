@@ -242,6 +242,7 @@ Codex Hook 目前不提供“本次尚未提交附件”的像素内容，所以
 - 继承的 Codex 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `/claude config set conversation-context off`，再用独立、明确的提示词重试。
 - Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。首次安装、信任 Hook 和排障应使用交互式 `codex`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
+- `/claude status` 会显示当前进程是否设置了自定义 `ANTHROPIC_BASE_URL`，但不会泄露 URL。若认证显示正常而调用长期停在 `running`，可运行 `claude doctor` 检查端点与登录状态；桥接器会尊重 Claude 环境，不会擅自改写自定义端点。
 
 ## 安装
 

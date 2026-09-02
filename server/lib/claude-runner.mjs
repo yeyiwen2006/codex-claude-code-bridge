@@ -668,6 +668,10 @@ export async function runClaudeNative(input, options = {}) {
 
 export async function getClaudeHealth(options = {}) {
   const environment = options.environment ?? process.env;
+  const endpointMetadata = typeof environment.ANTHROPIC_BASE_URL === "string"
+    && environment.ANTHROPIC_BASE_URL.trim().length > 0
+    ? { custom_endpoint: true }
+    : {};
   let commandConfiguration;
   try {
     commandConfiguration = options.commandConfiguration ?? getCommandConfiguration(environment);
@@ -675,6 +679,7 @@ export async function getClaudeHealth(options = {}) {
     return {
       installed: false,
       authenticated: false,
+      ...endpointMetadata,
       error: error.message,
       error_code: error.code ?? "INVALID_COMMAND_CONFIGURATION",
     };
@@ -695,6 +700,7 @@ export async function getClaudeHealth(options = {}) {
       return {
         installed: false,
         authenticated: false,
+        ...endpointMetadata,
         error: versionResult.exitCode !== 0
           ? versionResult.stderr.trim() || "Claude Code version check failed."
           : "The resolved 'claude' executable did not identify itself as Claude Code.",
@@ -725,6 +731,7 @@ export async function getClaudeHealth(options = {}) {
       installed: true,
       version: versionText,
       authenticated: auth.loggedIn === true,
+      ...endpointMetadata,
     };
     if (typeof auth.authMethod === "string") {
       health.auth_method = auth.authMethod;
@@ -740,6 +747,7 @@ export async function getClaudeHealth(options = {}) {
     return {
       installed: false,
       authenticated: false,
+      ...endpointMetadata,
       error: error.message,
       error_code: error.code ?? "HEALTH_CHECK_FAILED",
     };

@@ -191,6 +191,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 - The inherited Codex conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `/claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Use interactive `codex` for first-time hook trust and troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
+- `/claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, use `claude doctor` to inspect endpoint and login status. The bridge respects Claude's environment and does not override a custom endpoint.
 
 ## Install
 

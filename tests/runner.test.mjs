@@ -151,7 +151,9 @@ test("terminates an invocation at its configured timeout", async () => {
 });
 
 test("health check returns only whitelisted authentication fields", async () => {
-  const health = await getClaudeHealth({ commandConfiguration });
+  const environment = { ...process.env };
+  delete environment.ANTHROPIC_BASE_URL;
+  const health = await getClaudeHealth({ commandConfiguration, environment });
   assert.deepEqual(health, {
     installed: true,
     version: "9.9.9 (Claude Code)",
@@ -159,4 +161,13 @@ test("health check returns only whitelisted authentication fields", async () => 
     auth_method: "test_token",
     api_provider: "test",
   });
+});
+
+test("health check reports a custom endpoint without exposing its URL", async () => {
+  const health = await getClaudeHealth({
+    commandConfiguration,
+    environment: { ...process.env, ANTHROPIC_BASE_URL: "https://private.example.invalid/secret-path" },
+  });
+  assert.equal(health.custom_endpoint, true);
+  assert.equal(JSON.stringify(health).includes("private.example.invalid"), false);
 });
