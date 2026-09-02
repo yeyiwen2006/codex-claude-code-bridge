@@ -2,7 +2,7 @@
 
 [English](./README.en.md)
 
-Codex Claude Code Bridge 是一个非官方、开源的本地 Codex 插件。它可以让你在Codex APP或CLI中中调用Claude Code CLI，且直接继承Codex会话中的上下文，从而只需要在Codex里交互就可以集成两大Coding Agent，还可以在Codex额度不足时实现无缝切换（doge）。你可以在 Codex App 或 Codex CLI 的聊天框中直接输入确定性 `/claude` 命令，由 Hook 在 Codex 模型启动前拦截命令，再调用本机 Claude Code CLI。运行时审批使用 Claude 官方的 `--permission-prompt-tool` MCP 接口。
+Codex Claude Code Bridge 是一个非官方、开源的本地 Codex 插件。它可以让你在Codex APP或CLI中调用Claude Code CLI，且直接继承Codex会话中的上下文，从而只需要在Codex里交互就可以集成两大Coding Agent，还可以在Codex额度不足时实现无缝切换（doge）。你可以在 Codex App 或 Codex CLI 的聊天框中直接输入确定性 `/claude` 命令，由 Hook 在 Codex 模型启动前拦截命令，再调用本机 Claude Code CLI。运行时审批使用 Claude 官方的 `--permission-prompt-tool` MCP 接口。
 
 它支持当前 Codex 对话继承、多张剪贴板原图、Claude 模型与推理力度、六种原生权限模式、运行时逐工具审批、Claude Skills、插件、Hooks 与 MCP，以及 Claude 会话恢复。
 
