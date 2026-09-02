@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "claude_code_bridge": {
+    "codex_claude_code_bridge": {
       "type": "stdio",
       "command": "node",
       "args": [

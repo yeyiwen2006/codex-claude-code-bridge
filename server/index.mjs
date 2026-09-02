@@ -16,8 +16,8 @@ import {
   pathsOverlap,
 } from "./lib/validation.mjs";
 
-const SERVER_NAME = "claude-code-bridge";
-const SERVER_VERSION = "0.2.0";
+const SERVER_NAME = "codex-claude-code-bridge";
+const SERVER_VERSION = "0.3.1";
 const FALLBACK_PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
@@ -170,7 +170,7 @@ export const TOOLS = Object.freeze([
   {
     name: "claude_code_run",
     title: "Run Claude Code with Changes",
-    description: "Run local Claude Code non-interactively with permission to edit the selected project. The bridge exposes file tools only and always denies shell and web tools. Claude plugin MCP tools remain denied unless the user explicitly enables them. Permission bypass modes and arbitrary CLI flags are unsupported.",
+    description: "Model-directed fallback for running local Claude Code with project edits. Unlike deterministic /claude hook commands, this MCP fallback exposes file tools only, denies shell and web tools, and does not support bypass or arbitrary CLI flags.",
     inputSchema: {
       type: "object",
       properties: {
@@ -179,7 +179,7 @@ export const TOOLS = Object.freeze([
           type: "string",
           enum: ["acceptEdits", "auto", "dontAsk"],
           default: "acceptEdits",
-          description: "Claude permission mode for the fixed file-only tool set. acceptEdits is the default; dontAsk pre-approves only the listed file tools; auto uses Claude's classifier when the account supports it.",
+          description: "Claude permission mode for this MCP fallback's fixed file-only tool set. acceptEdits is the default; dontAsk pre-approves only listed file tools; auto uses Claude's classifier when supported.",
         },
       },
       required: ["prompt", "working_directory", "authorization_id"],
@@ -263,7 +263,7 @@ function assertSessionRoot(input, authorizationRoot) {
   }
   const boundRoot = sessionRoots.get(input.sessionId);
   if (!boundRoot) {
-    throw new InputError("This session was not created by the current Claude Code Bridge server session.");
+    throw new InputError("This session was not created by the current Codex Claude Code Bridge server session.");
   }
   if (!pathsEqual(boundRoot, authorizationRoot)) {
     throw new InputError("Claude Code sessions cannot be resumed under a different authorized project root.");

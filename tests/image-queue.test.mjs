@@ -17,7 +17,7 @@ const PNG_1X1 = Buffer.from(
 let temporaryRoot;
 
 before(async () => {
-  temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "claude-code-bridge-images-"));
+  temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-images-"));
 });
 
 after(async () => {

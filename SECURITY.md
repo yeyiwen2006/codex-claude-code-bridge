@@ -2,95 +2,107 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest released minor version. Pre-release and locally modified builds are supported on a best-effort basis.
+Security fixes are applied to the latest published version.
 
 ## Reporting a vulnerability
 
-Do not put credentials, private source code, Claude transcripts, clipboard images, local paths, or a working exploit in a public issue. Prefer GitHub private vulnerability reporting when enabled. Otherwise contact the maintainer through a private channel listed on the repository profile.
-
-Include the bridge version, Codex version, Claude Code version, operating system, a minimal reproduction, expected boundary, and observed behavior. Redact usernames, account identifiers, tokens, proxy URLs, proprietary code, and image content.
+Do not open a public issue containing credentials, private prompts, proprietary source, or exploit details. Contact the maintainer privately and include the affected version, platform, reproduction steps, impact, and any proposed mitigation.
 
 ## Trust boundaries
 
-The bridge executes locally under the current user's operating-system identity. Its directory capabilities, tool lists, approvals, and path checks are application controls, not a VM, container, or Windows security boundary.
+Codex Claude Code Bridge runs locally under the current operating-system user. It is not a VM, container, Windows security boundary, or network sandbox.
 
-The bridge deliberately keeps these boundaries separate:
+There are two distinct execution paths:
 
-- Codex hook trust: Codex requires the user to review and trust non-managed plugin hooks. A changed hook definition requires renewed review.
-- Project access: every Codex task explicitly authorizes one canonical project root for four hours.
-- Bridge approval: write-capable deterministic commands can be staged for a second `/claude approve <id>` command, run automatically, or denied.
-- Claude permissions: only Read, Glob, Grep, Edit, and Write can be enabled. Bash, PowerShell, WebFetch, and WebSearch are always denied.
-- Claude plugin tools: MCP tools contributed by loaded Claude plugins remain denied until `plugin-tools=on` is explicitly configured.
-- Claude customization sources: user/project settings, Skills, plugins, MCP servers, and hooks are disabled by default and require a non-`safe` source selection.
+- Deterministic `/claude` hook commands use the local Claude Code CLI and its official `--permission-prompt-tool` MCP interface. Their permissions follow Claude's native modes and runtime permission flow.
+- The optional model-directed Codex MCP fallback retains its own temporary directory capability and conservative tool list. It does not silently inherit direct-command bypass behavior.
 
-Permission-bypass modes and arbitrary Claude CLI argument passthrough are intentionally unsupported.
+`/claude access allow <directory>` confirms the launch root, binds resumable Claude sessions to that root, and prevents accidental execution in a different Codex project. It does not stop Bash, plugins, MCP servers, or other tools from reaching paths that the current user can access when Claude's own permission flow allows them.
 
-## Deterministic command hook
+## Native permission modes
 
-`/claude` commands are parsed by a fixed grammar in `UserPromptSubmit` before the Codex model runs. Non-`/claude` prompts produce no hook output and continue normally. The parser never evaluates shell syntax, environment substitutions, command substitutions, or redirections.
+The deterministic path supports all current Claude modes:
 
-Hook commands use fixed script paths under `PLUGIN_ROOT`. Claude prompts are delivered through stdin, and every subprocess is created with `shell: false`.
+- `manual` passes Claude Code's native `manual` mode and pauses only for real permission requests not already resolved by hooks, rules, or mode behavior.
+- `accept-edits` maps to `acceptEdits`.
+- `plan` maps to `plan`.
+- `auto` maps to `auto` and depends on Claude/account availability.
+- `dont-ask` maps to `dontAsk` and denies unresolved prompts.
+- `bypass` maps to `bypassPermissions` with Claude's required explicit dangerous-mode acknowledgement.
 
-Codex currently surfaces deterministic command output as a hook block/warning, not a normal assistant message. Do not place secrets in prompts or rely on UI formatting as an access-control boundary.
+The bridge does not add an entire-task approval before Claude starts. A detached worker keeps the same Claude process alive while a specific tool request waits in the permission-prompt MCP server. `/claude allow` or `/claude deny` resolves that request, and execution resumes from the same tool call.
+
+Claude evaluates hooks, managed settings, deny rules, ask rules, its permission mode, allow rules, and residual safeguards. The bridge does not circumvent organization policy or Claude errors.
+
+## Bypass mode
+
+Bypass is intentionally available because Claude Code exposes it natively. In this mode the deterministic bridge does not impose a fixed tools list, deny Bash or PowerShell, deny web access, deny Claude plugin/MCP tools, or confine filesystem access to the launch root.
+
+Consequences include:
+
+- Claude can execute commands and start processes as the current user.
+- Claude can read, modify, or delete data outside the project when the current user can do so.
+- Claude can access the network and invoke enabled third-party MCP servers, plugins, Skills, and Hooks.
+- Subagents can inherit powerful permission modes according to Claude's native behavior.
+- Project content, inherited conversation, image text, tool output, Skills, plugins, or MCP responses may contain prompt injection that leads to harmful actions.
+
+Use bypass only when the project, loaded customizations, and intended operations are trusted. Prefer `manual`, `accept-edits`, or `plan` for ordinary work.
+
+Claude's residual safeguards still apply. Examples can include explicit ask/deny policy rules, managed settings, Hooks, interactive tools, connector policy, critical-path deletion protection, and cross-session restrictions. Their exact behavior is version- and policy-dependent.
+
+## Runtime approval state
+
+Global settings and per-Codex-task state are stored as UTF-8 JSON under `PLUGIN_DATA`. State can contain directory authorization, queued-image metadata, Claude session IDs, a background job ID, and one current permission request summary.
+
+The complete task specification is written to a private per-job JSON file before the worker starts and deleted when the worker ends. It can contain the prompt, inherited conversation snapshot, configuration snapshot, image paths, and authorization root. The actual tool input remains in the worker's memory; a bounded display copy is placed in state so the user can make a decision.
+
+Claude results are stored as private UTF-8 Markdown files until consumed or the Codex task is cleaned up. The state files and result files are application-private data, not encrypted vaults. Any process running as the same OS user may be able to read them.
+
+## Approval scopes
+
+`once` approves only the current callback. `session`, `project`, and `user` return matching permission-update suggestions supplied by Claude when available. These suggestions may update in-memory session rules or Claude settings files. Review the displayed tool and intended scope before choosing a persistent option.
+
+`/claude answer` passes an answer object to Claude's `AskUserQuestion` call. Question text and answers are treated as user data and may be sent to the model.
 
 ## Clipboard images
 
-The clipboard is read only for `/claude image add`. Ordinary chat and ordinary `/claude run` never read it.
+The bridge reads the Windows clipboard only after an explicit `/claude image add`. It copies supported PNG, JPEG, GIF, and WebP data into the plugin data directory, validates the captured bytes, and preserves queue order. It does not continuously monitor the clipboard.
 
-- Windows file-drop images are copied into the current session's private `PLUGIN_DATA/images/<session>` directory.
-- A native PNG clipboard stream is copied directly when available.
-- A Bitmap-only clipboard image is encoded as lossless PNG; metadata and original container bytes may change.
-- PNG, JPEG, GIF, and WebP magic bytes are validated without file hashes.
-- Queue limits are 20 images, 25 MiB per image, and 100 MiB total.
-- Duplicate detection uses the Windows clipboard sequence number. It is not a cryptographic identity check.
-- Deletion is restricted to exact queued files beneath the current session image directory. The implementation does not recursively delete arbitrary paths.
-- Images are consumed after an invocation attempt, manually cleared by the user, or cleaned on `SessionEnd`. A crash or forced process termination can leave private files behind under `PLUGIN_DATA`; users may remove that plugin data after confirming no bridge task is active.
+Queued images remain local until a Claude task is run, at which point Claude Code reads the private image paths. The model and any enabled external tools may receive information extracted from the images. Clear the queue before switching to unrelated sensitive work.
 
-Clipboard contents are sensitive. A malicious local program running as the same user may race or replace clipboard data before capture. Verify `/claude image list` when image identity matters.
+## Codex conversation inheritance
 
-## Local state
+When enabled, the bridge reads the current Codex transcript path supplied by the hook and extracts visible user messages and final assistant responses. It does not intentionally include hidden reasoning or raw tool logs, but visible content can still contain secrets, proprietary material, malicious instructions, or incorrect statements.
 
-Global bridge settings and per-Codex-task state are stored as UTF-8 JSON under `PLUGIN_DATA`. State includes directory authorization, queued-image metadata, optional Claude session IDs, and at most one pending approval request.
+Use `/claude config set conversation-context off` before a task when the current Codex conversation should not be disclosed to Claude.
 
-A pending approval temporarily contains its prompt and configuration snapshot for up to 15 minutes. It is deleted on approval, cancellation, expiry, access-root change, access revocation, or `SessionEnd`. Large Claude results may be stored under the same private data root until the Codex task ends.
+## Claude customizations
 
-State writes use lock files and atomic replacement. A global invocation lock serializes deterministic Claude calls. MCP calls are limited to two concurrent processes, overlapping write scopes are rejected, and one Claude session UUID cannot be resumed concurrently.
+`customizations=all` uses Claude's normal user, project, and local settings cascade and is the default for new installs. Loaded CLAUDE.md files, Skills, Hooks, plugins, MCP servers, and settings are trusted Claude inputs and code. They may execute local programs, use credentials, send network requests, or modify files.
 
-## Claude plugins, Skills, and hooks
-
-An explicit `--plugin-dir`, a user-installed Claude plugin, or a project/user customization source may contain executable hooks, MCP servers, agents, or instructions. Loading a plugin is code execution trust, not merely reading documentation.
-
-`customizations=plugin-only` limits on-disk setting sources and loads only bridge-configured `--plugin-dir` entries. `user`, `project`, and `all` load progressively broader Claude configuration. `plugin-tools=off` blocks contributed MCP tools but cannot make an untrusted plugin or hook safe. Inspect third-party plugin code before enabling it.
-
-Skills and repository content may contain prompt injection. The bridge's fixed tool list limits available actions but does not guarantee correct or benign model behavior.
+Use `safe` to disable filesystem customization sources while troubleshooting, or `plugin-only` to load only explicit local plugin paths. Neither choice turns the bridge into a complete sandbox.
 
 ## Process and credential handling
 
-- The Claude executable is resolved to an accessible real path. Empty PATH entries are ignored.
-- Before a model invocation, `--version` must identify the resolved program as Claude Code.
-- The child environment is an allowlist for Claude authentication, common proxy/certificate configuration, and basic OS process variables.
-- Credentials are not accepted as hook commands or MCP arguments and are not intentionally logged or returned.
-- stdout and stderr are separated and size-limited; calls have hard timeouts and cancellation.
-- Malformed, empty, or non-success Claude JSON is treated as failure even when the process exits with code zero.
+The background Claude CLI inherits the normal environment needed by Claude Code so local authentication, provider configuration, hooks, plugins, MCP servers, and command tools behave natively. Environment variables visible to a normal Claude Code process are therefore also visible to the worker and to code it launches.
 
-If `persist-session=on`, Claude Code itself may save JSONL transcripts containing prompts, source, tool inputs, and results in the user's Claude configuration directory. Those files are outside the bridge's cleanup scope.
+The bridge does not print or deliberately store Claude access tokens. It does not perform login, alter authentication, or attempt to bypass organization controls. Avoid placing unrelated secrets in global environment variables when running untrusted Claude customizations or bypass mode.
+
+All subprocess creation uses argument arrays with `shell: false`. User prompts are not interpolated into a shell command by the bridge. Claude may independently invoke its Bash or PowerShell tools when its permission system allows that action.
 
 ## Data leaving the computer
 
-Local does not mean offline. Deterministic commands can send prompts, code, and queued images through Claude Code to Anthropic or another configured provider. Model-directed MCP calls can additionally send the user's request through Codex/OpenAI. Claude plugins and MCP tools may contact further services when enabled.
+At minimum, prompts and relevant context are sent to the configured Claude provider. Depending on enabled settings and tools, data can also be sent to MCP servers, web services, plugins, hooks, model providers, or commands started by Claude. Review those components' own security and privacy policies.
 
-Users are responsible for ensuring that they have authority to disclose every project, image, prompt, and plugin-provided datum to the relevant providers.
+## Security regression checks
 
-## Forbidden regressions
+Changes should preserve these properties:
 
-Treat any of the following as a security issue:
-
-- Adding a Claude permission-bypass mode or enabling flag.
-- Reintroducing Bash, PowerShell, or arbitrary CLI flag passthrough.
-- Constructing a shell command from user-controlled text or enabling `shell: true`.
-- Reading the clipboard for non-image commands.
-- Capturing credentials in command/MCP arguments, logs, result files, or telemetry.
-- Allowing project writes without an unexpired canonical directory authorization.
-- Deleting files outside the exact per-session plugin-data queue/result paths.
-- Resuming a Claude session under a different authorized project root.
-- Loading user/project Claude customizations or plugin MCP tools without an explicit configuration change.
+- deterministic commands remain intercepted before the Codex model;
+- runtime approval resolves the current permission-prompt MCP request instead of restarting the task;
+- bypass remains an explicit mode and is never silently selected by the MCP fallback;
+- no organization or Claude policy error is circumvented;
+- subprocesses use fixed executables, argument arrays, and `shell: false`;
+- clipboard capture requires an explicit command;
+- state and result paths remain under plugin data;
+- tests and UTF-8 validation pass before release.

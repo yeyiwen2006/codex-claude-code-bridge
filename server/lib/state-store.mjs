@@ -15,13 +15,12 @@ import { InputError } from "./validation.mjs";
 export const DEFAULT_COMMAND_CONFIG = Object.freeze({
   model: null,
   effort: null,
-  permission: "edit",
-  approval: "ask",
-  customizations: "safe",
-  pluginTools: false,
+  permission: "manual",
+  customizations: "all",
   timeoutSeconds: 1800,
   maxBudgetUsd: null,
   persistSession: false,
+  conversationContext: true,
   pluginDirectories: [],
 });
 
@@ -41,7 +40,7 @@ export function resolvePluginData(environment = process.env) {
     }
     return path.resolve(configured);
   }
-  return path.join(os.tmpdir(), "claude-code-bridge-development-data");
+  return path.join(os.tmpdir(), "codex-claude-code-bridge-development-data");
 }
 
 function validateIdentifier(identifier, label) {
@@ -57,7 +56,9 @@ export function defaultSessionState() {
     authorization: null,
     images: [],
     lastClipboardSequence: null,
-    pending: null,
+    activeJob: null,
+    sessionPermission: null,
+    sessionEnded: false,
     claudeSessionId: null,
     claudeSessionRoot: null,
     forkNext: false,
@@ -155,7 +156,7 @@ async function acquireLock(dataRoot, name) {
         throw statError;
       }
       if (Date.now() >= deadline) {
-        throw new InputError("Another Claude Code Bridge command is updating local state; retry shortly.");
+        throw new InputError("Another Codex Claude Code Bridge command is updating local state; retry shortly.");
       }
       await delay(50);
     }

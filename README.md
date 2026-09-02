@@ -1,327 +1,293 @@
-# Claude Code Bridge
+# Codex Claude Code Bridge
 
 [English](./README.en.md)
 
-Claude Code Bridge 是一个可公开发布到 GitHub、也可安装在个人电脑上的非官方 Codex 本地插件。它让用户在 Codex 聊天框里使用确定性的 `/claude` 命令直接调用本机 Claude Code，并提供一个可累积多张图片的 Windows 剪贴板队列。
+Codex Claude Code Bridge 是一个非官方、开源的本地 Codex 插件。它让你在 Codex App 或 Codex CLI 的聊天框中直接输入确定性 `/claude` 命令，由 Hook 在 Codex 模型启动前拦截命令，再调用本机 Claude Code CLI。运行时审批使用 Claude 官方的 `--permission-prompt-tool` MCP 接口。
 
-这个项目不隶属于 OpenAI 或 Anthropic，也不捆绑 Claude Code、账号、订阅或 API Key。
+它支持当前 Codex 对话继承、多张剪贴板原图、Claude 模型与推理力度、六种原生权限模式、运行时逐工具审批、Claude Skills、插件、Hooks 与 MCP，以及 Claude 会话恢复。
 
-## 两种调用路径
+本项目与 OpenAI、Anthropic 均无从属或背书关系，也不附带 Claude Code、账号、订阅或 API 密钥。
 
-### 确定性命令路径
+> `/claude ...` 是插件 Hook 命令，不是 Codex 内置斜杠命令。安装并信任 Hook 后，命令不会先交给 Codex 模型解释。
 
-输入 `/claude ...` 时，插件的 `UserPromptSubmit` Hook 会在 Codex 模型启动之前解析并执行命令，然后阻止原提示词继续进入模型。
+## 支持范围
 
-```text
-Codex 聊天框
-  → UserPromptSubmit Hook
-  → 固定命令解析器
-  → 本机 Claude Code CLI
-  → Claude 的模型提供商
-```
+完整插件只支持 Codex App 与 Codex CLI。它依赖 `.codex-plugin` 清单、Codex 的 `UserPromptSubmit`/`SessionEnd` Hook、任务级 `PLUGIN_DATA`、`transcript_path` 和 Codex Skill，因此不能作为其他 Agent 的等价插件直接安装。
 
-这条路径不会要求 Codex 模型理解命令，也不通过模型选择 MCP 工具。本项目的隔离测试确认，被 Hook 拦截的命令可以让 Codex 输入、输出和推理 token 都保持为 0。
+其他支持本地 stdio MCP 的 Agent 可以自行配置 `.mcp.json` 中的 MCP 服务器，并复用 `claude_code_health`、`claude_code_authorize_directory`、`claude_code_plan` 和 `claude_code_run` 四个保守工具；这种方式不包含 `/claude` 命令、Codex 对话继承、任务清理、剪贴板图片队列或原生运行时审批，属于有限的 MCP 复用，不是完整产品支持。
 
-Codex 当前公开 Hook 输出接口不能创建普通助手气泡，因此命令结果会以 Hook 阻止信息显示在当前任务中。较长的 Claude 输出会显示头尾预览，并把完整 UTF-8 文本保存到插件的私有数据目录。
+## 最简单的用法
 
-### MCP 与 Skill 兼容路径
-
-插件仍提供 `claude_code_health`、`claude_code_authorize_directory`、`claude_code_plan` 和 `claude_code_run`，供用户明确要求 Codex 模型协调 Claude 时使用。这条路径会使用 Codex 模型，不是 `/claude` 命令的默认实现。
-
-## Codex App 与 Codex CLI
-
-### Codex App
-
-Codex App 的输入框可以通过插件选择器或 `@` 显式选择 Claude Code Bridge。选中后，输入框上方会显示插件名称。这个标签适合自然语言的 MCP/Skill 兼容路径，应把它视为当前请求的显式插件选择，而不是永久切换整个会话的执行引擎。
-
-- 直接发送 `/claude ...` 命令时，不需要每条消息都选择或携带 Claude Code Bridge 标签。只要插件已经安装并启用，确定性 Hook 就会识别以 `/claude` 开头的独立消息；标签存在也不会影响命令。
-- 使用普通自然语言并希望 Codex 模型明确协调 Claude 时，可以为该请求选择 Claude Code Bridge，或用 `@` 显式调用它。不要依赖之前某条消息的标签作为永久会话设置；需要强制指定插件的自然语言请求应再次选择。
-- 当前 Codex App 不提供 CLI 的 `/hooks` 命令。插件安装、启用和显式选择在 App 的 Plugins 界面或输入框中完成；如果 App 显示 Hook 审查或信任提示，按界面提示核对后允许即可。
-- 安装或更新插件后应新建一个 Codex 任务，使新的 Hook、Skill 和 MCP 配置在任务启动时加载。
-
-### Codex CLI
-
-Codex CLI 没有 App 输入框中的插件标签。使用 `/plugins` 检查插件已经安装并启用，安装或更新后启动新会话，再用 `/hooks` 审查并信任插件携带的 `UserPromptSubmit` 和 `SessionEnd` Hook。之后直接输入 `/claude ...`。
-
-参见 [OpenAI 插件文档](https://learn.chatgpt.com/docs/plugins) 和 [Codex Hook 文档](https://learn.chatgpt.com/docs/hooks)。
-
-## 多图直传
-
-Codex 的 `UserPromptSubmit` Hook 只公开当前提示词文字，不公开本次尚未提交的图片附件。因此插件不尝试解析不稳定的 Codex 会话文件，而是读取用户刚刚粘贴图片时仍在 Windows 剪贴板中的原始数据。
-
-单张图片：
-
-```text
-1. 在 Codex 聊天框粘贴图片
-2. 发送 /claude image add
-3. 发送 /claude image run -- 分析图片并修改对应代码
-```
-
-多张位图：
-
-```text
-粘贴第 1 张 → /claude image add
-粘贴第 2 张 → /claude image add
-粘贴第 3 张 → /claude image add
-/claude image run -- 对比全部图片并完成任务
-```
-
-如果 Windows 剪贴板一次包含多个图片文件，例如在文件管理器中复制了多个 PNG/JPEG 文件，一次 `/claude image add` 会按剪贴板顺序全部加入队列。
-
-图片行为：
-
-- 队列按加入顺序保存，最多 20 张。
-- 单张不超过 25 MiB，队列合计不超过 100 MiB。
-- PNG 剪贴板流和文件复制保留原始字节。
-- 剪贴板只提供 Bitmap 时，插件转成像素无损 PNG；原格式、EXIF 和其他元数据不保证保留。
-- 重复检测使用 Windows 剪贴板序列号，不计算文件哈希。
-- 同一剪贴板内容默认不会重复加入；确需重复时使用 `/claude image add --force`。
-- 图片保存在 `PLUGIN_DATA` 下当前 Codex 任务的私有队列中。
-- Claude 调用实际开始后，本次使用的图片会从队列删除；任务结束时也会清理剩余队列。
-- `/claude image clear` 可以手动清空，但存在引用这些图片的待审批任务时会拒绝清空。
-
-Windows 标准剪贴板通常只能同时保存一张裸位图，所以多次截图需要逐张粘贴并执行 `image add`。这种队列设计不会偷偷读取普通聊天中的剪贴板，也不会把旧图片自动附加到普通 `/claude run`。
-
-## 命令
-
-### 帮助和状态
-
-```text
-/claude help
-/claude status
-```
-
-### 目录授权
+第一次使用：
 
 ```text
 /claude access allow .
-/claude access allow "C:\path\to\project"
-/claude access show
-/claude access revoke
+/claude status
+/claude run -- 请概述当前项目
 ```
 
-每个 Codex 任务必须先明确授权项目根目录。授权经过真实路径规范化，有效期四小时。文件系统根目录、整个用户主目录和 Windows UNC 网络共享根会被拒绝。
-
-### 运行 Claude
+默认 `manual` 模式会立即启动 Claude。只读分析通常不会先弹审批；Claude 真正请求一个尚未获准的工具时，任务才暂停并显示工具名、参数和权限请求 ID。例如：
 
 ```text
-/claude plan -- 分析当前鉴权流程，只给出方案
-/claude run -- 修复登录错误并更新相关测试代码
+/claude allow a1b2c3d4 once
 ```
 
-当 `approval=ask` 且任务具有修改权限时，第一次命令只暂存任务：
+批准后是同一个 Claude 进程、同一个工具调用、同一项任务从暂停处继续，不会重新发送任务。
+
+## Codex App 与 Codex CLI
+
+### 在 Codex App 中
+
+1. 安装并启用插件。
+2. 完全退出 Codex App。
+3. 打开 PowerShell，运行 `codex`。
+4. 如果显示 `Hooks need review`，选择 `Review hooks`；确认来源为 `codex-claude-code-bridge@personal`，命令只启动插件内的 `scripts/command-hook.mjs`，然后信任。
+5. 如果 CLI 已进入聊天界面，输入 `/hooks` 完成同样的审查。不要选择“不信任并继续”。
+6. 退出 CLI，重新打开 Codex App，在目标项目中新建一个任务。
+7. 直接发送 `/claude status`。如果返回 Claude Code 状态，说明 Hook 已生效。
+
+Codex App 输入框可以选择 Codex Claude Code Bridge 插件，选择后会在输入框上方显示插件名。那主要用于自然语言触发 MCP/Skill 兼容路径。确定性 `/claude ...` 命令不要求每条消息都带插件名，也不需要先选择插件。
+
+当前 Codex App 没有 `/hooks` 页面，因此首次信任以及更新后 Hook 被标记为 `new or changed` 时，需要在 Codex CLI 中审查一次，再重新打开 App 并新建任务。
+
+### 在 Codex CLI 中
+
+1. 运行 `codex`。
+2. 用 `/plugins` 确认 `codex-claude-code-bridge` 已安装并启用。
+3. 用 `/hooks` 审查并信任插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。
+4. 新建会话或重新启动 CLI。
+5. 发送 `/claude status`，然后执行 `/claude access allow .`。
+
+之后在 App 和 CLI 中的 `/claude` 命令完全相同。
+
+## 权限模式
+
+桥接器透传 Claude Code 的原生权限判断顺序，包括 Claude Hooks、`deny` 规则、`ask` 规则、权限模式、`allow` 规则和运行时审批回调。
+
+| 插件名称 | Claude 原生模式 | 行为 |
+| --- | --- | --- |
+| `manual` | `manual` | 不预先批准未匹配工具；遇到真实权限请求时暂停 |
+| `accept-edits` | `acceptEdits` | 自动批准 Claude 原生定义的文件编辑和文件系统操作，其他未获准工具仍会询问 |
+| `plan` | `plan` | 以 Claude 原生计划模式运行；写操作不会自动获准 |
+| `auto` | `auto` | 由 Claude 的权限分类器批准或拒绝，取决于账号与组织策略是否支持 |
+| `dont-ask` | `dontAsk` | 未被规则预先允许的请求直接拒绝，不进入人工审批 |
+| `bypass` | `bypassPermissions` | 绕过普通权限提示，完整开放 Claude 可见工具；风险最高 |
+
+设置全局默认：
 
 ```text
-/claude run -- 实现这个改动
-/claude approve a1b2c3d4
+/claude config set permission manual
 ```
 
-也可以取消：
+只覆盖当前 Codex 会话后续任务：
 
 ```text
-/claude cancel a1b2c3d4
+/claude mode accept-edits
+/claude mode default
 ```
 
-待审批任务最多保留 15 分钟。提示词和设置快照只保存在本地插件数据目录，批准、取消、过期或任务结束后删除。
-
-### 图片
+只覆盖一次调用：
 
 ```text
-/claude image add
-/claude image add --force
+/claude run --permission plan -- 先分析实现方案
+/claude run --permission bypass -- 完成构建、测试和提交前检查
+```
+
+`image run`、`skill run` 和 `image skill` 也支持相同的 `--permission <模式>`。
+
+### bypass 的准确含义
+
+`bypass` 会向 Claude CLI 传递 `--permission-mode bypassPermissions` 与必须的显式危险模式开关。桥接器不会再附加以下限制：
+
+- 不限制为 Read/Edit 等固定工具集合；
+- 不屏蔽 Bash、PowerShell、WebFetch、WebSearch；
+- 不屏蔽 Claude 插件或 MCP 工具；
+- 不把已授权项目目录当作操作系统沙箱；
+- 不改变当前 Windows 用户的文件、网络和进程权限。
+
+`/claude access allow .` 在此模式下只是确认启动目录并将 Claude 会话绑定到该根目录，不是隔离边界。Claude 自身仍可能执行 Hooks、组织策略、`deny`/`ask` 规则、关键路径保护和跨会话安全保护。如果企业策略关闭 bypass，插件会显示 Claude 返回的错误，不会绕过策略。
+
+## 运行时审批
+
+`manual`、`accept-edits`、`plan` 等模式中，只有 Claude 原生权限流程没有提前解决的工具请求才会进入插件审批。后台 worker 保持官方 SDK 查询和 Claude 进程存活；审批回调一直等待，直到用户决定或取消任务。
+
+```text
+/claude allow a1b2c3d4 once
+/claude allow a1b2c3d4 session
+/claude allow a1b2c3d4 project
+/claude allow a1b2c3d4 user
+/claude deny a1b2c3d4 -- 不要删除文件，请改为归档
+```
+
+`session`、`project`、`user` 会在 Claude 提供相应原生权限建议时，将建议原样交回权限提示工具。`project` 优先使用项目本地或项目设置目标。
+
+如果 Claude 调用 `AskUserQuestion`，插件会显示问题 JSON。按问题原文填写答案：
+
+```text
+/claude answer a1b2c3d4 -- {"使用哪种数据库？":"SQLite"}
+```
+
+后台任务运行超过当前 Hook 等待窗口时，命令会先返回任务 ID。之后使用：
+
+```text
+/claude status
+/claude result
+/claude cancel 1a2b3c4d
+```
+
+## 当前 Codex 对话继承
+
+`run`、`plan`、`image run`、`skill run` 默认读取 Hook 提供的 `transcript_path`，提取当前任务中可见的用户消息和 Codex 最终回复，并把本次任务放在最前面交给 Claude。工具原始日志、隐藏推理和密钥不会被主动提取。
+
+```text
+/claude config set conversation-context off
+/claude config set conversation-context on
+```
+
+对话中可能包含秘密、专有材料或提示词注入。关闭继承只影响后续调用。
+
+## 多张原图
+
+Codex Hook 目前不提供“本次尚未提交附件”的像素内容，所以插件从 Windows 剪贴板直接捕获刚粘贴的原始位图或图片文件，不需要用户手动另存。
+
+单张图片：
+
+1. 在任意应用复制图片或在 Codex 输入框粘贴图片。
+2. 发送 `/claude image add`。
+3. 发送 `/claude image run -- 描述或比较这张图片`。
+
+多张图片时，每复制或粘贴一张，就发送一次 `/claude image add`；一次复制多个图片文件也可以一次全部加入。随后：
+
+```text
 /claude image list
-/claude image run -- 找出这些界面截图之间的差异并修复代码
-/claude image skill reviewer:visual-check -- 检查三张截图
+/claude image run [--permission <模式>] -- 对比全部图片
+/claude image skill <Skill 名称> [--permission <模式>] -- [参数]
 /claude image clear
 ```
 
-### 设置
+图片按队列顺序交付。任务完成或失败后，已交付的图片会从队列移除；运行中的任务仍引用图片时不会允许清空。
+
+## Claude 配置、插件与 Skills
 
 ```text
 /claude config show
-/claude config set model sonnet
-/claude config set model default
+/claude config set model opus
 /claude config set effort high
-/claude config set permission edit
-/claude config set approval ask
-/claude config set customizations plugin-only
-/claude config set plugin-tools off
+/claude config set permission manual
+/claude config set customizations all
 /claude config set timeout-seconds 1800
-/claude config set max-budget-usd 5
+/claude config set max-budget-usd off
 /claude config set persist-session on
-/claude config reset effort
-/claude config reset all
+/claude config set conversation-context on
+/claude config reset [键|all]
 ```
 
-设置保存在插件的本地私有数据目录，不写入项目仓库。
-
-#### 文件权限
-
-`permission` 可选值：
-
-| 值 | Claude 模式 | 行为 |
-|---|---|---|
-| `plan` | `plan` | 只提供 Read、Glob、Grep |
-| `edit` | `acceptEdits` | 提供 Read、Glob、Grep、Edit、Write |
-| `locked` | `dontAsk` | 只预授权固定文件工具，其他请求直接拒绝 |
-| `auto` | `auto` | 使用 Claude 的分类器，但仍只有固定文件工具；账号和模型必须支持 |
-
-公开版本固定不向 Claude 提供 Bash、PowerShell、WebFetch 或 WebSearch，也不支持任何绕过权限模式。需要运行测试、构建或 Git 命令时，建议由 Codex 在自己的 sandbox 和审批策略下执行。
-
-#### 桥接审批
-
-`approval` 可选值：
-
-| 值 | 行为 |
-|---|---|
-| `ask` | 修改任务先生成 8 位审批 ID，用户再发送 `approve` |
-| `auto` | 目录已授权后立即启动修改任务 |
-| `deny` | 拒绝所有具有修改权限的任务 |
-
-这是一次 Claude 任务批次的审批，不是每个 Edit 的交互审批。非交互 `claude -p` 无法在 Codex Hook 中显示 Claude 自己的终端审批对话。
-
-#### Claude 自定义配置
-
-`customizations` 可选值：
+`customizations`：
 
 | 值 | 加载内容 |
-|---|---|
-| `safe` | 使用 Claude `--safe-mode`，禁用用户和项目自定义项 |
-| `plugin-only` | 不读取用户/项目 settings，只加载桥接器显式配置的 `--plugin-dir` |
-| `user` | 加载 Claude 用户级 settings、Skills、插件和 Hooks |
-| `project` | 加载当前项目与 local 设置 |
-| `all` | 加载 user、project、local 全部来源 |
+| --- | --- |
+| `safe` | 不加载用户、项目和本地设置；用于排查损坏配置 |
+| `plugin-only` | 只加载用 `/claude plugin add` 显式加入的本地插件 |
+| `user` | 用户级设置、Skills、插件、Hooks 与 MCP |
+| `project` | 项目与本地设置、CLAUDE.md、Skills、插件、Hooks 与 MCP |
+| `all` | 不向 Claude CLI 指定 settingSources，使用原生默认加载行为 |
 
-加载用户或项目自定义项可能执行 Claude Hooks、MCP 服务器或插件代码。只有在信任这些内容时才启用。
-
-`plugin-tools=on` 允许已加载 Claude 插件贡献的 MCP 工具。它们可能访问网络或外部服务，因此与加载插件本身分开控制，默认关闭。
-
-### Claude 插件和 Skills
+新安装默认是 `all`，因此 Claude Code 中正常可用的配置、Skills、Hooks、插件和 MCP 通常会照常加载。
 
 ```text
 /claude plugin list
-/claude plugin add "C:\absolute\path\to\plugin"
-/claude plugin add "C:\absolute\path\to\plugin.zip"
-/claude plugin remove 1
-
+/claude plugin add "C:\绝对路径\my-plugin"
+/claude plugin remove <序号|绝对路径>
 /claude skill list
-/claude skill run simplify -- 检查刚才的改动
-/claude skill run my-plugin:review -- 重点检查权限边界
+/claude skill run my-plugin:review -- 检查权限边界
 ```
 
-`plugin add` 只把目录或 ZIP 加入桥接器的 `--plugin-dir` 列表，不复制、安装或删除插件。Claude 已安装的用户级插件也会显示在 `plugin list` 中；是否加载取决于 `customizations`。
+加载的 Claude Hooks、插件和 MCP 都能执行本地代码或外部操作，权限效果仍按 Claude 原生流程决定。
 
-Claude 插件 Skill 使用 `插件名:Skill名` 命名空间。`skill run` 会把 `/<skill-name>` 作为 Claude 提示词的开头直接交给 Claude CLI。普通 `run` 也允许 Claude 在已加载配置中按相关性自动选择 Skill。
-
-### Claude 会话
+## Claude 会话
 
 ```text
 /claude config set persist-session on
 /claude session show
-/claude session fork
 /claude session clear
+/claude session fork
 ```
 
-默认不保存可恢复会话。启用后，桥接器只按 Claude 返回的精确 UUID 恢复，并绑定到同一授权根。它不使用容易串线的 `--continue`。Claude Code 自己可能在用户配置目录保存包含提示词、源码和工具结果的 JSONL 会话文件。
+成功调用后保存 Claude session ID；同一授权根目录中的下一次调用可以恢复。`session fork` 让下一次恢复产生新的 Claude 会话分支。
 
-## 安全模型
+## 完整命令入口
 
-- `/claude` 命令使用固定语法和参数数组，prompt 通过 stdin 发送。
-- 启动进程使用 `shell: false`，不存在用户文本拼接成 shell 命令的路径。
-- Claude 可执行文件解析为真实绝对路径，并在调用前验证版本输出标识为 Claude Code。
-- 子进程只继承认证、代理、证书和基础操作系统所需的环境变量允许列表。
-- 不接受 API Key 作为聊天命令或 MCP 参数，也不记录凭据。
-- 同一时间只运行一个确定性 Claude 命令；MCP 路径限制为最多两个并发调用，并禁止重叠写目录。
-- stdout 和 stderr 有大小上限，进程有超时和取消处理。
-- 目录授权和文件工具白名单属于应用级防线，不是 Windows 操作系统沙箱。
-- Claude 输出、项目文件、图片文字、Skills、Hooks、插件和 MCP 返回都可能包含提示词注入，仍需人工检查最终变更。
-
-“本地插件”不表示“离线”。数据流可能是：
+发送 `/claude help` 获取当前安装版本的准确命令列表。常用入口：
 
 ```text
-用户
-  → Codex 本地 Hook
-  → 本机 Claude Code CLI
-  → Anthropic 或用户配置的模型提供商
-  → 已授权项目和已排队图片
+/claude help
+/claude status
+/claude access allow [绝对路径|.]
+/claude access show
+/claude access revoke
+/claude run [--permission <模式>] -- <提示词>
+/claude plan -- <提示词>
+/claude result
 ```
 
-自然语言 MCP 路径还会先经过 Codex/OpenAI。只应处理有权交给相应服务的数据。
+## 两种调用路径
+
+确定性 Hook 路径由 `/claude` 命令直接触发，不需要 Codex 模型理解命令。Codex 当前 Hook 接口不能创建普通助手气泡，因此返回值显示为 Hook 阻止信息。
+
+插件还提供受保护的 MCP 与 Codex Skill 兼容路径，供用户明确要求“让 Codex 协调 Claude”时由 Codex 模型调用。MCP 回退仍保留单独的目录能力与保守工具面，不等同于确定性命令中的原生权限透传，也不会自动启用 bypass。
+
+## 已知边界与排查
+
+- Claude Code 偶尔会以成功状态结束但返回空正文，尤其是加载用户或项目自定义项时。插件会保留退出码、协议警告、停止原因等诊断元数据；可先执行 `/claude config set customizations plugin-only` 复测，再检查 Claude Hooks、插件和设置。
+- 继承的 Codex 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `/claude config set conversation-context off`，再用独立、明确的提示词重试。
+- Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。首次安装、信任 Hook 和排障应使用交互式 `codex`。
+- `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
 
 ## 安装
 
-### 要求
+要求：
 
-- 支持本地插件和 Hooks 的 Codex。
-- Node.js 18 或更新版本。
-- 本机 Claude Code CLI；当前验证版本为 `2.1.220`。
-- 用户自己的 Claude Code 登录或 Anthropic 凭据。
-- Windows 10/11 用于聊天框直接粘贴图片；macOS/Linux 当前仍可使用文本命令与 MCP，但没有实现剪贴板图片捕获。
+- 支持本地插件和 Hooks 的 Codex；
+- Node.js 18 或更高版本；
+- Windows PowerShell 5.1 或更高版本用于剪贴板图片捕获；
+- 本机 Claude Code CLI 已安装且完成登录；当前验证版本为 `2.1.258`；
+- npm 用于运行项目脚本；插件运行时代码本身不依赖第三方 npm 包。
 
-OpenAI 订阅不包含 Claude Code 用量。Claude 调用可能消耗 Anthropic 套餐额度或产生 API 费用。
-
-### 从 GitHub 安装
-
-公开仓库发布后，把 `<repository-url>` 换成真实地址：
+从源码：
 
 ```powershell
-git clone <repository-url> "$env:USERPROFILE\plugins\claude-code-bridge"
-node "$env:USERPROFILE\plugins\claude-code-bridge\scripts\register-personal-marketplace.mjs"
-codex plugin add claude-code-bridge@personal --json
+git clone https://github.com/yeyiwen2006/codex-claude-code-bridge.git
+cd codex-claude-code-bridge
+npm install
+npm run check
+node .\scripts\register-personal-marketplace.mjs
+codex plugin add codex-claude-code-bridge@personal
 ```
 
-个人 marketplace 文件位于 `~/.agents/plugins/marketplace.json`。注册脚本只添加或更新本插件条目，保留其他条目，并在覆盖现有 marketplace 前创建备份。
+安装或更新后都要新建 Codex 任务；Hook 定义变化时要在 CLI 中重新审查并信任。
 
-#### 在 Codex App 中使用
+## 安全与数据
 
-1. 在 App 的 Plugins 界面确认 Claude Code Bridge 已安装并启用。
-2. 在真正要交给 Claude 处理的项目中新建一个 Codex 任务，让 Hook、Skill 和 MCP 服务器在启动时加载。
-3. App 没有 `/hooks` 命令。如果界面显示 Hook 审查或信任提示，核对来源为 Claude Code Bridge 后按提示允许。
-4. 直接命令路径无需在每条消息上选择插件标签；输入 `/claude status` 检查 Claude CLI 和认证。
-5. 输入 `/claude access allow .` 授权当前任务的实际工作目录。
-6. 只有在使用普通自然语言的 MCP/Skill 兼容路径时，才需要从输入框选择 Claude Code Bridge 或用 `@` 显式调用；需要强制指定时应针对该请求重新选择。
+- 所有 Claude 进程都以当前 Windows 用户身份运行；插件不是 VM、容器或操作系统沙箱。
+- `manual` 的审批对象是 Claude 当前真实请求的工具，而不是整个任务。
+- `bypass` 允许 Claude 使用当前用户能使用的本机与网络能力，可能修改或删除项目外数据，也可能调用第三方插件和 MCP。
+- 提示词、继承对话、图片路径和任务状态保存在本机插件数据目录；模型请求与已启用外部工具的数据会离开电脑。
+- 不记录 Claude 身份令牌；后台 Claude CLI 继承正常 Claude Code 进程环境和认证来源。
+- 详细威胁模型见 [SECURITY.md](./SECURITY.md)。
 
-#### 在 Codex CLI 中使用
-
-1. 启动一个新的 Codex 会话。
-2. 输入 `/plugins`，确认 `claude-code-bridge@personal` 已安装并启用。
-3. 输入 `/hooks`，审查并信任插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。
-4. 输入 `/claude status` 检查 Claude CLI 和认证。
-5. 在目标项目目录中输入 `/claude access allow .`。
-
-### 更新
+## 开发、验证与公开发布
 
 ```powershell
-git -C "$env:USERPROFILE\plugins\claude-code-bridge" pull --ff-only
-codex plugin add claude-code-bridge@personal --json
+npm install
+npm run check
 ```
 
-更新后新建 Codex 任务。
+测试覆盖命令解析、当前对话继承、多图队列、原生权限模式映射、bypass 无桥接器工具黑名单、Claude 结果归一化、权限提示 MCP、主 MCP 协议与 UTF-8 静态检查。
 
-### 卸载
+项目可以作为普通公开 GitHub 仓库发布。仓库不包含 Claude 登录凭据、用户图片、插件运行状态或项目数据。使用者仍需在自己的电脑安装 Claude Code、Node.js 与 Codex，并独立信任 Hook。
 
-```powershell
-codex plugin remove claude-code-bridge@personal
-node "$env:USERPROFILE\plugins\claude-code-bridge\scripts\unregister-personal-marketplace.mjs" --yes
-```
-
-卸载脚本只移除个人 marketplace 条目，不删除插件源码、项目、Claude 配置、Claude 会话或凭据。
-
-## 本地开发与验证
-
-```powershell
-node .\scripts\check.mjs
-node --test
-```
-
-自动化测试使用假的 Claude 可执行程序和假的剪贴板捕获器，不消耗 Claude 额度，不修改真实项目，也不改变用户剪贴板。CI 在 Windows、macOS 和 Ubuntu 的 Node.js 18、20、22 上运行；Windows 剪贴板的真实集成测试需要用户在本机手动粘贴图片，因此不在公共 CI 中改写系统剪贴板。
-
-## 公开发布范围
-
-整个目录可以作为普通开源项目上传到 GitHub，MIT License 允许其他用户修改和再发布。每位使用者仍需在自己的电脑安装 Claude Code、完成认证并安装本地 Codex 插件。
-
-公开 GitHub 仓库与 OpenAI 通用插件目录上架不是一回事。当前架构依赖本机 stdio MCP、Codex Hook、Windows 剪贴板和本机 Claude CLI，不能原样作为云端 HTTPS MCP 服务运行。
+公开 GitHub 项目不等于 OpenAI 通用云插件。当前实现依赖本机 stdio MCP、Codex Hook、Windows 剪贴板和本地进程，不能原样作为云端 HTTPS MCP 服务运行。
 
 ## 许可证
 
-项目代码采用 MIT License，见 [LICENSE](./LICENSE)。Claude Code、Codex、OpenAI 服务和 Anthropic 服务继续受各自许可、条款和隐私政策约束。
+MIT，见 [LICENSE](./LICENSE)。

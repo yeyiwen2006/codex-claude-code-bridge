@@ -1,7 +1,7 @@
 {
-  "name": "claude-code-bridge",
-  "version": "0.2.0",
-  "description": "A dependency-free deterministic command and MCP bridge from Codex to local Claude Code.",
+  "name": "codex-claude-code-bridge",
+  "version": "0.3.1",
+  "description": "A deterministic command and MCP bridge from Codex to local Claude Code with runtime permission approvals and visible conversation inheritance.",
   "type": "module",
   "private": true,
   "engines": {

@@ -15,7 +15,7 @@ const mockClaude = path.join(testDirectory, "fixtures", "mock-claude.mjs");
 let temporaryDirectory;
 
 before(async () => {
-  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "claude-code-bridge-mcp-"));
+  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-mcp-"));
 });
 
 after(async () => {
@@ -77,7 +77,7 @@ test("serves JSON-RPC over stdio and invokes the configured CLI", async (context
     method: "initialize",
     params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } },
   });
-  assert.equal(initialized.result.serverInfo.name, "claude-code-bridge");
+  assert.equal(initialized.result.serverInfo.name, "codex-claude-code-bridge");
 
   const health = await request({
     jsonrpc: "2.0",

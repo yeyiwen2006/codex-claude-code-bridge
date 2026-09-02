@@ -1,257 +1,238 @@
-# Claude Code Bridge
+# Codex Claude Code Bridge
 
 [中文说明](./README.md)
 
-Claude Code Bridge is an unofficial, open-source local Codex plugin. It intercepts deterministic `/claude` commands before the Codex model starts, invokes an already-installed Claude Code CLI, and maintains a private multi-image Windows clipboard queue. A guarded MCP server and Codex Skill remain available as an optional model-directed fallback.
+Codex Claude Code Bridge is an unofficial open-source local Codex plugin. It intercepts deterministic `/claude` messages before the Codex model starts and invokes the local Claude Code CLI. Runtime approvals use Claude's official `--permission-prompt-tool` MCP interface. It supports visible Codex conversation inheritance, a private multi-image Windows clipboard queue, models and effort levels, all six native permission modes, per-tool runtime approvals, Claude Skills/plugins/hooks/MCP, and resumable sessions.
 
 The project is not affiliated with or endorsed by OpenAI or Anthropic. It does not bundle Claude Code, an account, a subscription, or an API key.
 
-## Execution paths
+> `/claude ...` is a plugin hook command, not a built-in Codex slash command. Once the hook is installed and trusted, Codex does not interpret it with a model.
 
-### Deterministic commands
+## Support scope
+
+The complete plugin supports Codex App and Codex CLI only. It depends on a `.codex-plugin` manifest, Codex `UserPromptSubmit`/`SessionEnd` hooks, task-scoped `PLUGIN_DATA`, `transcript_path`, and a Codex Skill, so another agent cannot install it as a feature-equivalent plugin.
+
+Other agents with local stdio MCP support may manually configure the server in `.mcp.json` and reuse the four conservative tools: `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. That limited MCP reuse does not include `/claude`, Codex conversation inheritance, task cleanup, the clipboard image queue, or native runtime approvals and is not a supported equivalent of the complete product.
+
+## Quick start
 
 ```text
-Codex composer
-  → UserPromptSubmit hook
-  → fixed command parser
-  → local Claude Code CLI
-  → the user's Claude model provider
+/claude access allow .
+/claude status
+/claude run -- Summarize this project
 ```
 
-The hook blocks the original `/claude` prompt, so the Codex model does not interpret the command or select an MCP tool. Isolated integration tests confirm that an intercepted command can complete with zero Codex input, output, and reasoning tokens.
+The default `manual` mode starts Claude immediately. It pauses only when Claude reaches a real tool permission request that native rules and the selected mode have not already resolved:
 
-The current public Codex hook API cannot create a normal assistant bubble. Command output therefore appears as the hook's blocking message. Long Claude results are previewed in the task and stored as complete UTF-8 text under the plugin's private data directory.
+```text
+/claude allow a1b2c3d4 once
+```
 
-### MCP and Skill fallback
+The same background Claude process and tool call continue from the paused point. The task is not restarted.
 
-The plugin also exposes `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. These are for cases where the user explicitly wants the Codex model to coordinate Claude; they are not the implementation behind `/claude` commands.
+## Codex App
 
-## Codex App and Codex CLI
+1. Install and enable the plugin, then fully quit the Codex App.
+2. Open PowerShell and run `codex`.
+3. At `Hooks need review`, choose `Review hooks`. Verify the source is `codex-claude-code-bridge@personal` and the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
+4. If CLI is already open, use `/hooks` for the same review. Do not continue without trusting the hook.
+5. Exit CLI, reopen the App, and create a new task in the target project.
+6. Send `/claude status`. A hook-produced Claude status means interception is active.
 
-### Codex App
+The App's plugin picker or `@` mention displays the plugin name above the composer. That is useful for the natural-language MCP/Skill fallback. Deterministic `/claude ...` messages do not need the plugin label on every request and do not require selecting the plugin first.
 
-The Codex App composer can explicitly select Claude Code Bridge through the plugin picker or an `@` mention. The selected plugin name appears above the composer. That label is useful for the natural-language MCP/Skill fallback and should be treated as an explicit selection for the current request, not as a permanent switch for the entire chat.
+The App does not currently expose `/hooks`. Initial trust, and re-trust after an update is marked `new or changed`, must be completed once in Codex CLI. Reopen the App and start a new task afterward.
 
-- Direct `/claude ...` commands do not need the Claude Code Bridge label on every message. As long as the plugin is installed and enabled, the deterministic hook recognizes standalone messages that begin with `/claude`; leaving the label selected is harmless.
-- For an ordinary natural-language request where the Codex model must explicitly coordinate Claude, select Claude Code Bridge for that request or invoke it with `@`. Do not rely on a label from an earlier message as a permanent chat setting; select it again whenever explicit plugin routing matters.
-- The current Codex App does not expose the CLI `/hooks` command. Install, enable, and explicitly select plugins through the App's Plugins UI or composer. If the App presents a hook review or trust prompt, inspect it and approve it through that UI.
-- Start a new Codex task after installing or updating the plugin so the task loads the new hooks, Skill, and MCP configuration.
+## Codex CLI
 
-### Codex CLI
+1. Run `codex`.
+2. Use `/plugins` to confirm the plugin is installed and enabled.
+3. Use `/hooks` to review and trust its `UserPromptSubmit` and `SessionEnd` hooks.
+4. Start a fresh CLI session.
+5. Send `/claude status`, then `/claude access allow .`.
 
-Codex CLI does not have the App's composer plugin label. Use `/plugins` to confirm the plugin is installed and enabled, start a new session after installation or update, then use `/hooks` to review and trust the bundled `UserPromptSubmit` and `SessionEnd` hooks. After that, enter `/claude ...` directly.
+The remaining commands are identical in App and CLI.
 
-See the [OpenAI plugin documentation](https://learn.chatgpt.com/docs/plugins) and [Codex hook documentation](https://learn.chatgpt.com/docs/hooks).
+## Native permission modes
+
+The bridge preserves Claude's native permission evaluation: hooks, deny rules, ask rules, the active permission mode, allow rules, and the runtime approval callback.
+
+| Bridge name | Native mode | Behavior |
+| --- | --- | --- |
+| `manual` | `manual` | No unmatched tool is pre-approved; real permission requests pause for the user |
+| `accept-edits` | `acceptEdits` | Native file-edit/filesystem actions are approved; other unmatched tools can prompt |
+| `plan` | `plan` | Native planning mode; writes are not auto-approved |
+| `auto` | `auto` | Claude's classifier allows or denies prompts when supported by account and policy |
+| `dont-ask` | `dontAsk` | Anything not pre-approved is denied without prompting |
+| `bypass` | `bypassPermissions` | Bypasses ordinary permission prompts and exposes Claude's full tool surface |
+
+Global default, current-Codex-task override, and one-run override:
+
+```text
+/claude config set permission manual
+/claude mode accept-edits
+/claude mode default
+/claude run --permission plan -- Analyze the implementation first
+/claude run --permission bypass -- Build and test the project
+```
+
+`image run`, `skill run`, and `image skill` accept the same `--permission` option.
+
+### Exact bypass behavior
+
+`bypass` passes `--permission-mode bypassPermissions` and Claude's required explicit dangerous-mode acknowledgement. The bridge adds no fixed tool list, Bash/PowerShell denial, web denial, MCP/plugin denial, or filesystem sandbox. `/claude access allow .` confirms the launch root and binds resumed sessions; it is not OS isolation. Claude runs as the current Windows user.
+
+Claude's own hooks, policy settings, ask/deny rules, critical-path protections, and cross-session safeguards still apply. If managed policy disables bypass, the bridge reports Claude's error and does not work around it.
+
+## Runtime approvals
+
+The detached worker keeps the same Claude process alive while the permission-prompt MCP tool waits:
+
+```text
+/claude allow <id> once
+/claude allow <id> session
+/claude allow <id> project
+/claude allow <id> user
+/claude deny <id> -- Do not delete files; archive them instead
+/claude answer <id> -- {"Which database?":"SQLite"}
+```
+
+`session`, `project`, and `user` echo matching native permission suggestions supplied by Claude when available. `project` prefers local/project settings destinations. `AskUserQuestion` requests display question JSON and use `/claude answer`.
+
+For a long-running background task:
+
+```text
+/claude status
+/claude result
+/claude cancel <job-id>
+```
+
+## Codex conversation inheritance
+
+`run`, `plan`, `image run`, and `skill run` read the hook's `transcript_path` by default, extract visible user messages and final Codex replies, and place the current task first. Raw tool logs, hidden reasoning, and credentials are not intentionally extracted.
+
+```text
+/claude config set conversation-context off
+/claude config set conversation-context on
+```
+
+Conversation text can still contain secrets, proprietary material, or prompt injection.
 
 ## Direct multi-image handoff
 
-`UserPromptSubmit` receives the prompt text but not the current uncommitted image attachments. The bridge therefore captures the same image data from the Windows clipboard after the user pastes into the Codex composer.
+The Codex hook does not expose pixels from unsubmitted attachments. The bridge captures the original bitmap or image files from the Windows clipboard without requiring a manual save.
 
-For one image:
-
-```text
-Paste the image into Codex
-/claude image add
-/claude image run -- Analyze the image and update the corresponding code
-```
-
-For several bitmap images:
+For each copied or pasted bitmap, send `/claude image add`; a clipboard containing multiple image files adds them together. Then:
 
 ```text
-Paste image 1 → /claude image add
-Paste image 2 → /claude image add
-Paste image 3 → /claude image add
-/claude image run -- Compare all queued images
-```
-
-When the clipboard contains a file-drop list with several image files, one `image add` captures all of them in clipboard order.
-
-- The queue preserves insertion order and accepts up to 20 images.
-- Each image is limited to 25 MiB and the queue to 100 MiB.
-- File-drop copies and PNG clipboard streams preserve original bytes.
-- A clipboard Bitmap is re-encoded as pixel-lossless PNG; original format and metadata may not survive.
-- Duplicate detection uses the Windows clipboard sequence number, not file hashes.
-- Use `/claude image add --force` to intentionally enqueue the same clipboard content again.
-- Images are private to the current Codex task under `PLUGIN_DATA`.
-- Images used by a run are consumed once the Claude invocation is attempted. Remaining images are removed on `SessionEnd` or by `/claude image clear`.
-
-The bridge never reads the clipboard for ordinary chat or a plain `/claude run`. Standard Windows clipboard semantics usually expose only one raw bitmap at a time, so separate screenshots must be enqueued one by one.
-
-## Command reference
-
-```text
-/claude help
-/claude status
-
-/claude access allow .
-/claude access allow "C:\path\to\project"
-/claude access show
-/claude access revoke
-
-/claude plan -- Analyze the authentication flow without editing
-/claude run -- Fix the login bug and update its tests
-/claude approve a1b2c3d4
-/claude cancel a1b2c3d4
-
-/claude image add
-/claude image add --force
 /claude image list
-/claude image run -- Compare every queued screenshot
-/claude image skill reviewer:visual-check -- Inspect the screenshots
+/claude image run [--permission <mode>] -- Compare every image
+/claude image skill <skill> [--permission <mode>] -- [arguments]
 /claude image clear
 ```
 
-Configuration:
+Images are delivered in queue order and removed after the consuming task completes or fails.
+
+## Configuration, plugins, and Skills
 
 ```text
 /claude config show
-/claude config set model sonnet
-/claude config set model default
+/claude config set model opus
 /claude config set effort high
-/claude config set permission edit
-/claude config set approval ask
-/claude config set customizations plugin-only
-/claude config set plugin-tools off
+/claude config set permission manual
+/claude config set customizations all
 /claude config set timeout-seconds 1800
-/claude config set max-budget-usd 5
+/claude config set max-budget-usd off
 /claude config set persist-session on
-/claude config reset effort
-/claude config reset all
+/claude config set conversation-context on
+/claude config reset [key|all]
 ```
 
-Claude plugins, Skills, and sessions:
+| `customizations` | Behavior |
+| --- | --- |
+| `safe` | Load no user/project/local settings; useful for troubleshooting |
+| `plugin-only` | Load only local plugins explicitly added through the bridge |
+| `user` | Load user settings, Skills, plugins, hooks, and MCP |
+| `project` | Load project/local settings, CLAUDE.md, Skills, plugins, hooks, and MCP |
+| `all` | Omit `--setting-sources` and use the native Claude CLI default cascade |
+
+New installs default to `all`, so normal Claude Code Skills, hooks, plugins, and MCP remain available.
 
 ```text
 /claude plugin list
-/claude plugin add "C:\absolute\path\to\plugin"
-/claude plugin add "C:\absolute\path\to\plugin.zip"
-/claude plugin remove 1
-
+/claude plugin add "C:\absolute\path\my-plugin"
+/claude plugin remove <index|absolute-path>
 /claude skill list
-/claude skill run simplify -- Review the current changes
-/claude skill run my-plugin:review -- Focus on permission boundaries
-
-/claude session show
-/claude session fork
-/claude session clear
+/claude skill run my-plugin:review -- Check permission boundaries
 ```
 
-## Permissions and approvals
+Loaded hooks, plugins, and MCP servers can run local code or external actions. Their behavior is governed by Claude's native permission flow.
 
-Each Codex task must explicitly authorize a canonical project root. The capability lasts four hours. Filesystem roots, the entire home directory, and Windows UNC share roots are rejected.
+## Claude sessions
 
-`permission` values:
+```text
+/claude config set persist-session on
+/claude session show
+/claude session clear
+/claude session fork
+```
 
-| Value | Claude mode | Fixed tools |
-|---|---|---|
-| `plan` | `plan` | Read, Glob, Grep |
-| `edit` | `acceptEdits` | Read, Glob, Grep, Edit, Write |
-| `locked` | `dontAsk` | Only the pre-approved file tools |
-| `auto` | `auto` | The same file tools, with Claude's classifier when supported |
+Successful calls retain the Claude session ID and can resume inside the same authorized root. `session fork` forks the next resumed call.
 
-The public build always denies Bash, PowerShell, WebFetch, and WebSearch. It does not support permission-bypass modes or arbitrary CLI arguments. Run tests, builds, and Git commands through Codex's own sandbox and approval system.
+## Deterministic and model-directed paths
 
-`approval` is a bridge-level batch policy:
+The deterministic hook path handles `/claude` before Codex model inference. Codex's current hook response API cannot create a normal assistant bubble, so results appear as hook-block messages.
 
-- `ask`: stage a write-capable task and require `/claude approve <id>`.
-- `auto`: start immediately after directory authorization.
-- `deny`: reject all write-capable tasks.
+A guarded MCP server and Codex Skill remain available when the user explicitly asks Codex to coordinate Claude. That MCP fallback keeps its separate directory capability and conservative tool surface; it is not the direct command path and does not automatically enable bypass.
 
-Headless `claude -p` cannot surface Claude's interactive terminal permission dialog through a Codex hook, so `ask` deliberately uses a two-command approval flow.
+## Known boundaries and troubleshooting
 
-## Claude customizations, plugins, and Skills
-
-`customizations` controls which Claude configuration sources load:
-
-- `safe`: Claude `--safe-mode`; no user or project customizations.
-- `plugin-only`: no user/project settings; only explicit bridge `--plugin-dir` entries.
-- `user`: user settings, Skills, plugins, and hooks.
-- `project`: project and local sources.
-- `all`: user, project, and local sources.
-
-Only enable a source after trusting its hooks, MCP servers, plugins, and instructions. `plugin-tools=on` separately permits MCP tools contributed by loaded Claude plugins; it is off by default because those tools may access networks or external services.
-
-`plugin add` records a local directory or ZIP for repeated `--plugin-dir` flags. It does not install, copy, update, or delete that plugin. Plugin Skills use Claude's `plugin-name:skill-name` namespace. `skill run` sends `/<skill-name>` directly to Claude, while ordinary runs can still let Claude select loaded Skills automatically.
-
-Sessions are not persisted by default. When enabled, the bridge resumes only the exact UUID returned by Claude and binds it to the same authorized root. It never uses `--continue`. Claude Code itself may store JSONL transcripts containing prompts, source, and tool results in the user's Claude configuration directory.
-
-## Security and data flow
-
-- Fixed command grammar and argument arrays; prompts travel over stdin.
-- `shell: false`; no user text is interpolated into a shell command.
-- The resolved executable is canonicalized and must identify itself as Claude Code before a run.
-- A small environment allowlist carries only authentication, proxy/certificate, and basic OS variables.
-- API keys are never accepted as command or MCP arguments and are not logged.
-- Deterministic commands are globally serialized. The MCP path caps concurrency and locks overlapping write scopes.
-- Output limits, timeouts, cancellation, session/root binding, and private state files are enforced.
-- Directory capabilities and file-tool restrictions are application controls, not an operating-system sandbox.
-
-Local does not mean offline. Deterministic commands can send prompts, source snippets, and queued images through Claude Code to Anthropic or another configured provider. The MCP fallback additionally passes the user's request through Codex/OpenAI. Use only data you are authorized to share with the relevant services.
+- Claude Code can occasionally return a successful envelope with an empty result, especially when user or project customizations are loaded. The bridge preserves exit code, protocol warning, stop reason, and related diagnostic metadata. First retry with `/claude config set customizations plugin-only`, then inspect Claude hooks, plugins, and settings.
+- The inherited Codex conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `/claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
+- Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Use interactive `codex` for first-time hook trust and troubleshooting.
+- Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
 
 ## Install
 
 Requirements:
 
-- Codex with local plugin and hook support.
-- Node.js 18 or newer.
-- A local Claude Code CLI; version `2.1.220` is currently verified.
-- The user's own Claude login or Anthropic credentials.
-- Windows 10/11 for direct composer-paste capture. Text commands and MCP remain portable, but macOS/Linux clipboard capture is not implemented yet.
-
-After publishing this repository, replace `<repository-url>`:
+- Codex with local plugin and hook support;
+- Node.js 18 or newer;
+- Windows PowerShell 5.1+ for clipboard capture;
+- a locally installed and authenticated Claude Code CLI, verified with `2.1.258`;
+- npm for project scripts; runtime code has no third-party npm dependency.
 
 ```powershell
-git clone <repository-url> "$env:USERPROFILE\plugins\claude-code-bridge"
-node "$env:USERPROFILE\plugins\claude-code-bridge\scripts\register-personal-marketplace.mjs"
-codex plugin add claude-code-bridge@personal --json
+git clone https://github.com/yeyiwen2006/codex-claude-code-bridge.git
+cd codex-claude-code-bridge
+npm install
+npm run check
+node .\scripts\register-personal-marketplace.mjs
+codex plugin add codex-claude-code-bridge@personal
 ```
 
-### Use in the Codex App
+Start a new Codex task after every install or update. Re-review the hook in CLI whenever Codex marks it `new or changed`.
 
-1. Confirm in the App's Plugins UI that Claude Code Bridge is installed and enabled.
-2. Start a new Codex task inside the project that Claude should inspect or modify, so its hooks, Skill, and MCP server load at task startup.
-3. The App has no `/hooks` command. If it presents a hook review or trust prompt, verify that the source is Claude Code Bridge and approve it through the UI.
-4. The direct command path does not require selecting the plugin label on every message. Run `/claude status` to verify the local CLI and authentication.
-5. Run `/claude access allow .` to authorize the task's actual working directory.
-6. Select Claude Code Bridge in the composer, or use `@`, only for the natural-language MCP/Skill fallback. Select it again for each request where explicit plugin routing matters.
+## Security and data
 
-### Use in Codex CLI
+- Claude runs under the current Windows user. The plugin is not a VM, container, or OS sandbox.
+- `manual` approves the actual tool request, not a whole task batch.
+- `bypass` may modify or delete data outside the project and call external plugins/MCP/network services with the current user's capabilities.
+- Prompts, inherited conversation, image paths, and job state are stored locally under plugin data. Model requests and enabled external tools can send data off the machine.
+- The plugin does not log Claude credentials. The background CLI uses normal Claude Code environment and authentication sources.
+- See [SECURITY.md](./SECURITY.md) for the detailed threat model.
 
-1. Start a new Codex session.
-2. Run `/plugins` and confirm that `claude-code-bridge@personal` is installed and enabled.
-3. Run `/hooks` to review and trust the bundled `UserPromptSubmit` and `SessionEnd` hooks.
-4. Run `/claude status` to verify the local CLI and authentication.
-5. From the target project directory, run `/claude access allow .`.
-
-Update:
+## Development and publishing
 
 ```powershell
-git -C "$env:USERPROFILE\plugins\claude-code-bridge" pull --ff-only
-codex plugin add claude-code-bridge@personal --json
+npm install
+npm run check
 ```
 
-Uninstall:
+The project can be published as a normal public GitHub repository. It contains no user login credentials, clipboard images, runtime state, or project data. Each user must install Claude Code, Node.js, and Codex locally and trust the hook independently.
 
-```powershell
-codex plugin remove claude-code-bridge@personal
-node "$env:USERPROFILE\plugins\claude-code-bridge\scripts\unregister-personal-marketplace.mjs" --yes
-```
-
-## Develop and test
-
-```powershell
-node .\scripts\check.mjs
-node --test
-```
-
-Tests use a fake Claude executable and fake clipboard capture, consume no Claude allowance, do not modify a real project, and do not overwrite the user's clipboard. Public CI covers Node.js 18, 20, and 22 on Windows, macOS, and Ubuntu. Real Windows clipboard integration remains a local manual test because CI must not replace a user's system clipboard.
-
-## Publishing scope
-
-The whole directory can be published as a normal MIT-licensed GitHub project. Other users still install and authenticate Claude Code on their own machines and install this plugin locally.
-
-A public GitHub repository is not the same as a universal OpenAI plugin-directory listing. This architecture depends on a local stdio MCP server, Codex hooks, the Windows clipboard, and a local Claude executable, so it cannot be submitted unchanged as a cloud-hosted HTTPS MCP service.
+This local project is not a generic OpenAI cloud plugin: it depends on local stdio MCP, Codex hooks, the Windows clipboard, and local processes.
 
 ## License
 
-MIT; see [LICENSE](./LICENSE). Claude Code, Codex, OpenAI services, and Anthropic services remain subject to their own licenses, terms, and privacy policies.
+MIT. See [LICENSE](./LICENSE).

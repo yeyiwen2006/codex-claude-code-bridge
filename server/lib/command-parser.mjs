@@ -88,6 +88,14 @@ function requireNoPrompt(prompt, usage) {
   }
 }
 
+function permissionOverride(tokens, usage) {
+  if (tokens.length === 1) return undefined;
+  if (tokens.length === 3 && tokens[1] === "--permission" && tokens[2].length > 0) {
+    return tokens[2];
+  }
+  throw new CommandError(`用法：${usage}`);
+}
+
 export function parseClaudeCommand(rawPrompt) {
   if (typeof rawPrompt !== "string") {
     return null;
@@ -118,17 +126,71 @@ export function parseClaudeCommand(rawPrompt) {
     requireNoPrompt(prompt, "/claude status");
     return { kind: "status" };
   }
-  if (group === "run" || group === "plan") {
-    expectArity(tokens, 1, 1, `/claude ${group} -- <提示词>`);
-    return { kind: group, prompt: requirePrompt(prompt, `/claude ${group} -- <提示词>`) };
+  if (group === "result") {
+    expectArity(tokens, 1, 1, "/claude result");
+    requireNoPrompt(prompt, "/claude result");
+    return { kind: "result" };
   }
-  if (group === "approve" || group === "cancel") {
-    expectArity(tokens, 2, 2, `/claude ${group} <审批 ID>`);
-    requireNoPrompt(prompt, `/claude ${group} <审批 ID>`);
+  if (group === "run" || group === "plan") {
+    const usage = group === "run"
+      ? "/claude run [--permission <模式>] -- <提示词>"
+      : "/claude plan -- <提示词>";
+    const override = group === "run" ? permissionOverride(tokens, usage) : undefined;
+    if (group === "plan") expectArity(tokens, 1, 1, usage);
+    return {
+      kind: group,
+      prompt: requirePrompt(prompt, usage),
+      ...(override ? { permissionOverride: override } : {}),
+    };
+  }
+  if (group === "approve" || group === "allow") {
+    expectArity(tokens, 2, 3, `/claude ${group} <权限请求 ID> [once|session|project|user]`);
+    requireNoPrompt(prompt, `/claude ${group} <权限请求 ID> [once|session|project|user]`);
     if (!/^[0-9a-f]{8}$/i.test(action)) {
       throw new CommandError("审批 ID 必须是插件返回的 8 位十六进制 ID。");
     }
-    return { kind: group, approvalId: action.toLowerCase() };
+    const scope = rest[0] ?? "once";
+    if (!["once", "session", "project", "user"].includes(scope)) {
+      throw new CommandError("批准范围只能是 once、session、project 或 user。");
+    }
+    return { kind: "allow", approvalId: action.toLowerCase(), scope };
+  }
+  if (group === "deny") {
+    expectArity(tokens, 2, 2, "/claude deny <权限请求 ID> -- [原因]");
+    if (!/^[0-9a-f]{8}$/i.test(action)) {
+      throw new CommandError("审批 ID 必须是插件返回的 8 位十六进制 ID。");
+    }
+    return { kind: "deny", approvalId: action.toLowerCase(), reason: prompt?.trim() };
+  }
+  if (group === "answer") {
+    expectArity(tokens, 2, 2, "/claude answer <权限请求 ID> -- <JSON 回答对象>");
+    if (!/^[0-9a-f]{8}$/i.test(action)) {
+      throw new CommandError("审批 ID 必须是插件返回的 8 位十六进制 ID。");
+    }
+    const rawAnswers = requirePrompt(prompt, "/claude answer <权限请求 ID> -- <JSON 回答对象>");
+    let answers;
+    try {
+      answers = JSON.parse(rawAnswers);
+    } catch (error) {
+      throw new CommandError(`回答必须是 JSON 对象（${error.message}）。`);
+    }
+    if (answers === null || typeof answers !== "object" || Array.isArray(answers)) {
+      throw new CommandError("回答必须是以问题原文为键的 JSON 对象。");
+    }
+    return { kind: "answer", approvalId: action.toLowerCase(), answers };
+  }
+  if (group === "cancel") {
+    expectArity(tokens, 1, 2, "/claude cancel [任务 ID]");
+    requireNoPrompt(prompt, "/claude cancel [任务 ID]");
+    if (action !== undefined && !/^[0-9a-f]{8}$/i.test(action)) {
+      throw new CommandError("任务 ID 必须是插件返回的 8 位十六进制 ID。");
+    }
+    return { kind: "cancel", jobId: action?.toLowerCase() };
+  }
+  if (group === "mode") {
+    expectArity(tokens, 2, 2, "/claude mode <default|manual|accept-edits|plan|auto|dont-ask|bypass>");
+    requireNoPrompt(prompt, "/claude mode <default|manual|accept-edits|plan|auto|dont-ask|bypass>");
+    return { kind: "mode", value: action };
   }
 
   if (group === "config") {
@@ -182,12 +244,26 @@ export function parseClaudeCommand(rawPrompt) {
       return { kind: `image-${action}` };
     }
     if (action === "run") {
-      expectArity(tokens, 2, 2, "/claude image run -- <提示词>");
-      return { kind: "image-run", prompt: requirePrompt(prompt, "/claude image run -- <提示词>") };
+      const usage = "/claude image run [--permission <模式>] -- <提示词>";
+      const override = rest.length === 0
+        ? undefined
+        : permissionOverride([action, ...rest], usage);
+      return {
+        kind: "image-run",
+        prompt: requirePrompt(prompt, usage),
+        ...(override ? { permissionOverride: override } : {}),
+      };
     }
     if (action === "skill") {
-      expectArity(tokens, 3, 3, "/claude image skill <Skill 名称> -- [参数]");
-      return { kind: "image-skill", skill: rest[0], prompt: prompt ?? "" };
+      const usage = "/claude image skill <Skill 名称> [--permission <模式>] -- [参数]";
+      expectArity(tokens, 3, 5, usage);
+      const override = rest.length === 1 ? undefined : permissionOverride([action, ...rest.slice(1)], usage);
+      return {
+        kind: "image-skill",
+        skill: rest[0],
+        prompt: prompt ?? "",
+        ...(override ? { permissionOverride: override } : {}),
+      };
     }
     throw new CommandError("用法：/claude image add|list|clear|run|skill ...");
   }
@@ -215,8 +291,15 @@ export function parseClaudeCommand(rawPrompt) {
       return { kind: "skill-list" };
     }
     if (action === "run") {
-      expectArity(tokens, 3, 3, "/claude skill run <Skill 名称> -- [参数]");
-      return { kind: "skill-run", skill: rest[0], prompt: prompt ?? "" };
+      const usage = "/claude skill run <Skill 名称> [--permission <模式>] -- [参数]";
+      expectArity(tokens, 3, 5, usage);
+      const override = rest.length === 1 ? undefined : permissionOverride([action, ...rest.slice(1)], usage);
+      return {
+        kind: "skill-run",
+        skill: rest[0],
+        prompt: prompt ?? "",
+        ...(override ? { permissionOverride: override } : {}),
+      };
     }
     throw new CommandError("用法：/claude skill list|run ...");
   }

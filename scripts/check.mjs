@@ -20,7 +20,7 @@ const mcp = await readJson(".mcp.json");
 const hooks = await readJson("hooks/hooks.json");
 const packageManifest = await readJson("package.json");
 
-assert.equal(plugin.name, "claude-code-bridge");
+assert.equal(plugin.name, "codex-claude-code-bridge");
 const escapedPackageVersion = packageManifest.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 assert.match(
   plugin.version,
@@ -32,8 +32,8 @@ assert.equal(plugin.skills, "./skills/");
 assert.ok(Array.isArray(plugin.interface.defaultPrompt));
 assert.ok(plugin.interface.defaultPrompt.length >= 1 && plugin.interface.defaultPrompt.length <= 3);
 
-const server = mcp.mcpServers?.claude_code_bridge;
-assert.ok(server, "missing claude_code_bridge MCP configuration");
+const server = mcp.mcpServers?.codex_claude_code_bridge;
+assert.ok(server, "missing codex_claude_code_bridge MCP configuration");
 assert.equal(server.type, "stdio");
 assert.equal(server.command, "node");
 assert.equal(server.cwd, ".");
@@ -54,6 +54,11 @@ const sourceFiles = [
   "server/lib/validation.mjs",
   "server/lib/command-parser.mjs",
   "server/lib/command-handler.mjs",
+  "server/lib/codex-transcript.mjs",
+  "server/lib/claude-job-manager.mjs",
+  "server/lib/claude-job-worker.mjs",
+  "server/lib/claude-result-text.mjs",
+  "server/lib/permission-prompt-server.mjs",
   "server/lib/image-queue.mjs",
   "server/lib/state-store.mjs",
   "scripts/command-hook.mjs",
@@ -61,9 +66,6 @@ const sourceFiles = [
 for (const relativePath of sourceFiles) {
   const absolutePath = path.join(repositoryRoot, relativePath);
   const source = await readFile(absolutePath, "utf8");
-  assert.equal(source.includes("--dangerously-skip-permissions"), false, `${relativePath} contains a forbidden flag`);
-  assert.equal(source.includes("--allow-dangerously-skip-permissions"), false, `${relativePath} contains a forbidden flag`);
-  assert.equal(source.includes('"bypassPermissions"'), false, `${relativePath} contains a forbidden permission mode`);
   assert.equal(source.includes("shell: true"), false, `${relativePath} enables shell command construction`);
   execFileSync(process.execPath, ["--check", absolutePath], { stdio: "inherit" });
 }

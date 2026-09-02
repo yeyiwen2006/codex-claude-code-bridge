@@ -4,7 +4,7 @@ import { copyFile, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const PLUGIN_NAME = "claude-code-bridge";
+const PLUGIN_NAME = "codex-claude-code-bridge";
 const marketplacePath = path.join(os.homedir(), ".agents", "plugins", "marketplace.json");
 
 if (!process.argv.includes("--yes")) {
@@ -34,8 +34,8 @@ if (retained.length === marketplace.plugins.length) {
 }
 
 marketplace.plugins = retained;
-await copyFile(marketplacePath, `${marketplacePath}.claude-code-bridge.bak`);
-const temporaryPath = `${marketplacePath}.claude-code-bridge.tmp`;
+await copyFile(marketplacePath, `${marketplacePath}.codex-claude-code-bridge.bak`);
+const temporaryPath = `${marketplacePath}.codex-claude-code-bridge.tmp`;
 await writeFile(temporaryPath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
 await rename(temporaryPath, marketplacePath);
 process.stdout.write(`Removed only the ${PLUGIN_NAME} marketplace entry. Plugin source files were not deleted.\n`);

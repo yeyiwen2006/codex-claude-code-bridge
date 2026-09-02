@@ -224,6 +224,7 @@ export function executeProcess(command, argumentsList, options = {}) {
     environment = process.env,
     maxOutputBytes = configuredMaximumOutputBytes(environment),
     stdinText,
+    inheritFullEnvironment = false,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -263,7 +264,7 @@ export function executeProcess(command, argumentsList, options = {}) {
     try {
       child = spawn(command, argumentsList, {
         cwd,
-        env: childEnvironment(environment),
+        env: inheritFullEnvironment ? environment : childEnvironment(environment),
         shell: false,
         windowsHide: true,
         detached: process.platform !== "win32",
@@ -420,6 +421,58 @@ export function buildClaudeArguments(input) {
     disallowedTools.push("mcp__*");
   }
   argumentsList.push("--disallowed-tools", disallowedTools.join(","));
+  return argumentsList;
+}
+
+export function buildNativeClaudeArguments(input, options = {}) {
+  const permissionMode = input.permissionMode === "default" ? "manual" : input.permissionMode;
+  const argumentsList = [
+    "-p",
+    "--output-format",
+    "json",
+    "--permission-mode",
+    permissionMode,
+    "--no-chrome",
+  ];
+
+  if (input.permissionMode === "bypassPermissions") {
+    argumentsList.push("--allow-dangerously-skip-permissions");
+  }
+  switch (input.customizationSources) {
+    case "safe":
+      argumentsList.push("--safe-mode");
+      break;
+    case "plugin-only":
+      argumentsList.push("--setting-sources", "");
+      break;
+    case "user":
+      argumentsList.push("--setting-sources", "user");
+      break;
+    case "project":
+      argumentsList.push("--setting-sources", "project,local");
+      break;
+    case "all":
+      break;
+    default:
+      throw new BridgeProcessError("Unknown Claude customization source.", "INVALID_ARGUMENT");
+  }
+  for (const directory of input.extraDirectories) argumentsList.push("--add-dir", directory);
+  for (const imageDirectory of new Set(input.imagePaths.map((imagePath) => path.dirname(imagePath)))) {
+    argumentsList.push("--add-dir", imageDirectory);
+  }
+  for (const pluginDirectory of input.pluginDirectories) argumentsList.push("--plugin-dir", pluginDirectory);
+  if (input.sessionId) {
+    argumentsList.push("--resume", input.sessionId);
+    if (input.forkSession) argumentsList.push("--fork-session");
+  }
+  if (!input.persistSession) argumentsList.push("--no-session-persistence");
+  if (input.model) argumentsList.push("--model", input.model);
+  if (input.effort) argumentsList.push("--effort", input.effort);
+  if (input.maxBudgetUsd !== undefined) argumentsList.push("--max-budget-usd", String(input.maxBudgetUsd));
+  if (options.permissionPromptToolName && options.mcpConfig) {
+    argumentsList.push("--mcp-config", JSON.stringify(options.mcpConfig));
+    argumentsList.push("--permission-prompt-tool", options.permissionPromptToolName);
+  }
   return argumentsList;
 }
 
@@ -590,6 +643,25 @@ export async function runClaude(input, options = {}) {
     environment: options.environment ?? process.env,
     maxOutputBytes: options.maxOutputBytes,
     stdinText: promptWithImages(input),
+  });
+  return normalizeClaudeResult(processResult);
+}
+
+export async function runClaudeNative(input, options = {}) {
+  const commandConfiguration = options.commandConfiguration ?? getCommandConfiguration(options.environment);
+  await verifyClaudeExecutable(commandConfiguration, options);
+  const argumentsList = [
+    ...commandConfiguration.prefixArguments,
+    ...buildNativeClaudeArguments(input, options),
+  ];
+  const processResult = await executeProcess(commandConfiguration.command, argumentsList, {
+    cwd: input.workingDirectory,
+    timeoutMs: input.timeoutSeconds * 1000,
+    signal: options.signal,
+    environment: options.environment ?? process.env,
+    maxOutputBytes: options.maxOutputBytes,
+    stdinText: promptWithImages(input),
+    inheritFullEnvironment: true,
   });
   return normalizeClaudeResult(processResult);
 }

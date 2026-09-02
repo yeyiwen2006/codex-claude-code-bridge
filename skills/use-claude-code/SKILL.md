@@ -21,7 +21,7 @@ Use the plugin MCP tools only when the user wants Codex itself to coordinate Cla
 3. Give Claude a self-contained prompt containing the goal, scope, constraints, and expected verification. Do not include credentials or unrelated private content.
 4. Keep `customization_sources` at `safe` unless the user explicitly trusts and requests Claude user/project customizations. Loading broader sources may run Claude hooks, plugins, agents, or MCP servers.
 5. Keep `allow_plugin_tools` false unless the user explicitly authorizes MCP tools contributed by loaded Claude plugins.
-6. For file changes, keep `permission_mode` at `acceptEdits` unless the user selects `dontAsk` or supported `auto` behavior. The bridge always limits Claude to Read, Glob, Grep, Edit, and Write and never exposes shell or web tools.
+6. For the model-directed MCP fallback, keep `permission_mode` at `acceptEdits` unless the user selects `dontAsk` or supported `auto` behavior. This fallback deliberately limits Claude to Read, Glob, Grep, Edit, and Write and does not expose shell or web tools. The separate deterministic `/claude` hook path supports Claude's full native permission modes, including explicit bypass.
 7. If Claude reports a permission denial, report the denied operation. Do not retry with broader permissions without explicit user direction.
 
 The MCP path cannot automatically receive an image pasted into the current Codex composer. If the user wants original clipboard images without Codex model handling, direct them to the deterministic sequence:

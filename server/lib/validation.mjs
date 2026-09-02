@@ -3,8 +3,10 @@ import { realpath, stat } from "node:fs/promises";
 import os from "node:os";
 
 export const PERMISSION_MODES = Object.freeze([
+  "default",
   "acceptEdits",
   "auto",
+  "bypassPermissions",
   "dontAsk",
   "plan",
 ]);

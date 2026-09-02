@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   BridgeProcessError,
   buildClaudeArguments,
+  buildNativeClaudeArguments,
   getClaudeHealth,
   runClaude,
 } from "../server/lib/claude-runner.mjs";
@@ -21,7 +22,7 @@ const commandConfiguration = {
 let temporaryDirectory;
 
 before(async () => {
-  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "claude-code-bridge-runner-"));
+  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-runner-"));
 });
 
 after(async () => {
@@ -49,6 +50,25 @@ test("builds fixed argument arrays without prompt text or a permission bypass", 
   assert.equal(argumentsList.includes("--prompt-that-looks-like-an-option"), false);
   assert.ok(argumentsList.includes("Read,Glob,Grep,Edit,Write"));
   assert.ok(argumentsList.includes("Bash,PowerShell,WebFetch,WebSearch,mcp__*"));
+});
+
+test("builds native bypass arguments without bridge tool or network denials", async () => {
+  const input = await makeInput({
+    permission_mode: "bypassPermissions",
+    customization_sources: "all",
+  });
+  const argumentsList = buildNativeClaudeArguments(input, {
+    permissionPromptToolName: "mcp__bridge__request",
+    mcpConfig: { mcpServers: { bridge: { command: process.execPath, args: ["server.mjs"] } } },
+  });
+
+  assert.ok(argumentsList.includes("bypassPermissions"));
+  assert.ok(argumentsList.includes("--allow-dangerously-skip-permissions"));
+  assert.ok(argumentsList.includes("--permission-prompt-tool"));
+  assert.equal(argumentsList.includes("--tools"), false);
+  assert.equal(argumentsList.includes("--allowed-tools"), false);
+  assert.equal(argumentsList.includes("--disallowed-tools"), false);
+  assert.equal(argumentsList.some((entry) => /Bash|PowerShell|WebFetch|WebSearch|mcp__\*/.test(entry)), false);
 });
 
 test("loads explicit plugins without user or project setting sources", async () => {

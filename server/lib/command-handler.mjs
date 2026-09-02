@@ -1,21 +1,28 @@
-import { randomUUID } from "node:crypto";
 import {
-  mkdir,
   readFile,
   readdir,
   realpath,
   rmdir,
   stat,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   getClaudeHealth,
   getClaudePluginInventory,
-  runClaude,
 } from "./claude-runner.mjs";
+import {
+  composePromptWithCodexConversation,
+  readCodexConversation,
+} from "./codex-transcript.mjs";
+import {
+  cancelClaudeJob,
+  describeClaudeJob,
+  readClaudeJobResult,
+  resolveClaudeApproval,
+  startClaudeJob,
+} from "./claude-job-manager.mjs";
 import {
   CommandError,
   parseClaudeCommand,
@@ -49,17 +56,34 @@ import {
 } from "./validation.mjs";
 
 const AUTHORIZATION_TTL_MS = 4 * 60 * 60 * 1000;
-const APPROVAL_TTL_MS = 15 * 60 * 1000;
-const MAX_INLINE_RESULT_CHARACTERS = 12_000;
 const PERMISSION_MAP = Object.freeze({
+  default: "default",
+  manual: "default",
+  "accept-edits": "acceptEdits",
   plan: "plan",
   edit: "acceptEdits",
+  "dont-ask": "dontAsk",
   locked: "dontAsk",
   auto: "auto",
+  bypass: "bypassPermissions",
+  bypassPermissions: "bypassPermissions",
 });
-const APPROVAL_VALUES = Object.freeze(["ask", "auto", "deny"]);
+const PERMISSION_NAMES = Object.freeze(["manual", "accept-edits", "plan", "auto", "dont-ask", "bypass"]);
 
-const HELP_TEXT = `Claude Code Bridge 命令（由 Hook 直接执行，不调用 Codex 模型）
+function canonicalPermissionName(value) {
+  const mapped = PERMISSION_MAP[value];
+  const names = {
+    default: "manual",
+    acceptEdits: "accept-edits",
+    plan: "plan",
+    auto: "auto",
+    dontAsk: "dont-ask",
+    bypassPermissions: "bypass",
+  };
+  return names[mapped] ?? value;
+}
+
+const HELP_TEXT = `Codex Claude Code Bridge 命令（由 Hook 直接执行，不调用 Codex 模型）
 
 基础
   /claude help
@@ -72,9 +96,12 @@ const HELP_TEXT = `Claude Code Bridge 命令（由 Hook 直接执行，不调用
 
 运行
   /claude plan -- <提示词>
-  /claude run -- <提示词>
-  /claude approve <审批 ID>
-  /claude cancel <审批 ID>
+  /claude run [--permission <模式>] -- <提示词>
+  /claude allow <权限请求 ID> [once|session|project|user]
+  /claude deny <权限请求 ID> -- [原因]
+  /claude answer <权限请求 ID> -- <JSON 回答对象>
+  /claude cancel [任务 ID]
+  /claude result
 
 多图
   先粘贴图片，再发送 /claude image add
@@ -88,13 +115,13 @@ const HELP_TEXT = `Claude Code Bridge 命令（由 Hook 直接执行，不调用
   /claude config show
   /claude config set model <default|别名|完整模型名>
   /claude config set effort <default|low|medium|high|xhigh|max>
-  /claude config set permission <plan|edit|locked|auto>
-  /claude config set approval <ask|auto|deny>
+  /claude config set permission <manual|accept-edits|plan|auto|dont-ask|bypass>
+  /claude mode <default|manual|accept-edits|plan|auto|dont-ask|bypass>
   /claude config set customizations <safe|plugin-only|user|project|all>
-  /claude config set plugin-tools <on|off>
   /claude config set timeout-seconds <1..3600>
   /claude config set max-budget-usd <off|正数>
   /claude config set persist-session <on|off>
+  /claude config set conversation-context <on|off>
   /claude config reset [键|all]
 
 Claude 插件与 Skills
@@ -109,9 +136,10 @@ Claude 插件与 Skills
   /claude session clear
   /claude session fork
 
-安全边界
-  公开版本固定禁用 Claude 的 Bash、PowerShell、WebFetch 和 WebSearch。
-  plugin-tools 只控制已加载 Claude 插件贡献的 MCP 工具，默认关闭。`;
+权限说明
+  manual 只在 Claude 真实请求权限时暂停；批准后同一进程从原处继续。
+  bypass 完整使用 Claude 原生 bypassPermissions：不会由桥接器限制工具、网络或目录。
+  Claude 自身的策略、ask/deny 规则、Hooks 与关键路径保护仍然生效。`;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -134,13 +162,14 @@ function validateConfig(config) {
   if (!Object.hasOwn(PERMISSION_MAP, candidate.permission)) {
     throw new InputError("本地配置中的 permission 无效；请重置该设置。");
   }
-  if (!APPROVAL_VALUES.includes(candidate.approval)) {
-    throw new InputError("本地配置中的 approval 无效；请重置该设置。");
-  }
+  candidate.permission = canonicalPermissionName(candidate.permission);
   if (!CUSTOMIZATION_SOURCES.includes(candidate.customizations)) {
     throw new InputError("本地配置中的 customizations 无效；请重置该设置。");
   }
-  if (typeof candidate.pluginTools !== "boolean" || typeof candidate.persistSession !== "boolean") {
+  if (
+    typeof candidate.persistSession !== "boolean"
+    || typeof candidate.conversationContext !== "boolean"
+  ) {
     throw new InputError("本地配置中的布尔设置无效；请重置配置。");
   }
   if (!Number.isInteger(candidate.timeoutSeconds) || candidate.timeoutSeconds < 1 || candidate.timeoutSeconds > 3600) {
@@ -156,22 +185,31 @@ function validateConfig(config) {
   if (!Array.isArray(candidate.pluginDirectories) || candidate.pluginDirectories.length > 20) {
     throw new InputError("本地配置中的 pluginDirectories 无效；请重置配置。");
   }
-  return candidate;
+  return {
+    model: candidate.model,
+    effort: candidate.effort,
+    permission: candidate.permission,
+    customizations: candidate.customizations,
+    timeoutSeconds: candidate.timeoutSeconds,
+    maxBudgetUsd: candidate.maxBudgetUsd,
+    persistSession: candidate.persistSession,
+    conversationContext: candidate.conversationContext,
+    pluginDirectories: [...candidate.pluginDirectories],
+  };
 }
 
 function configDisplay(config) {
   const pluginState = config.customizations === "safe" ? "未加载（safe 模式）" : "已启用";
   return [
-    "当前 Claude Code Bridge 设置：",
+    "当前 Codex Claude Code Bridge 设置：",
     `model: ${config.model ?? "default"}`,
     `effort: ${config.effort ?? "default"}`,
     `permission: ${config.permission}`,
-    `approval: ${config.approval}`,
     `customizations: ${config.customizations}`,
-    `plugin-tools: ${config.pluginTools ? "on" : "off"}`,
     `timeout-seconds: ${config.timeoutSeconds}`,
     `max-budget-usd: ${config.maxBudgetUsd ?? "off"}`,
     `persist-session: ${config.persistSession ? "on" : "off"}`,
+    `conversation-context: ${config.conversationContext ? "on" : "off"}`,
     `plugin-directories: ${config.pluginDirectories.length}（${pluginState}）`,
   ].join("\n");
 }
@@ -199,24 +237,15 @@ function updateConfigValue(config, key, value) {
       break;
     case "permission":
       if (!Object.hasOwn(PERMISSION_MAP, value)) {
-        throw new CommandError("permission 只能是 plan、edit、locked 或 auto。");
+        throw new CommandError(`permission 只能是 ${PERMISSION_NAMES.join("、")}。`);
       }
-      updated.permission = value;
-      break;
-    case "approval":
-      if (!APPROVAL_VALUES.includes(value)) {
-        throw new CommandError("approval 只能是 ask、auto 或 deny。");
-      }
-      updated.approval = value;
+      updated.permission = canonicalPermissionName(value);
       break;
     case "customizations":
       if (!CUSTOMIZATION_SOURCES.includes(value)) {
         throw new CommandError(`customizations 只能是 ${CUSTOMIZATION_SOURCES.join("、")}。`);
       }
       updated.customizations = value;
-      break;
-    case "plugin-tools":
-      updated.pluginTools = onOff(value, "plugin-tools");
       break;
     case "timeout-seconds": {
       const parsed = Number(value);
@@ -241,6 +270,9 @@ function updateConfigValue(config, key, value) {
     case "persist-session":
       updated.persistSession = onOff(value, "persist-session");
       break;
+    case "conversation-context":
+      updated.conversationContext = onOff(value, "conversation-context");
+      break;
     default:
       throw new CommandError(`未知设置键：${key}`);
   }
@@ -255,12 +287,11 @@ function resetConfigValue(config, key) {
     model: "model",
     effort: "effort",
     permission: "permission",
-    approval: "approval",
     customizations: "customizations",
-    "plugin-tools": "pluginTools",
     "timeout-seconds": "timeoutSeconds",
     "max-budget-usd": "maxBudgetUsd",
     "persist-session": "persistSession",
+    "conversation-context": "conversationContext",
   };
   const property = map[key];
   if (!property) {
@@ -273,14 +304,9 @@ function pruneSessionState(state) {
   let changed = false;
   if (state.authorization && state.authorization.expiresAt <= Date.now()) {
     state.authorization = null;
-    state.pending = null;
     state.claudeSessionId = null;
     state.claudeSessionRoot = null;
     state.forkNext = false;
-    changed = true;
-  }
-  if (state.pending && state.pending.expiresAt <= Date.now()) {
-    state.pending = null;
     changed = true;
   }
   return changed;
@@ -328,27 +354,15 @@ function selectedImages(state, imageIds) {
   return imageIds.map((id) => {
     const image = byId.get(id);
     if (!image) {
-      throw new CommandError(`审批所引用的图片已不在队列中：${id}`);
+      throw new CommandError(`任务所引用的图片已不在队列中：${id}`);
     }
     return image;
   });
 }
 
-function requestSummary(request) {
-  const preview = request.prompt.replace(/\s+/g, " ").slice(0, 160);
-  return [
-    `工作目录：${request.workingDirectory}`,
-    `权限：${request.config.permission}`,
-    `模型：${request.config.model ?? "default"}`,
-    `推理力度：${request.config.effort ?? "default"}`,
-    `图片：${request.imageIds.length} 张`,
-    `任务预览：${preview}${request.prompt.length > preview.length ? "…" : ""}`,
-  ].join("\n");
-}
-
 async function buildRunInput(request, state) {
   const images = selectedImages(state, request.imageIds);
-  const permissionMode = request.forcePlan ? "plan" : PERMISSION_MAP[request.config.permission];
+  const permissionMode = PERMISSION_MAP[request.permissionName];
   const activePlugins = request.config.customizations === "safe"
     ? []
     : request.config.pluginDirectories;
@@ -368,95 +382,38 @@ async function buildRunInput(request, state) {
     persist_session: request.config.persistSession,
     customization_sources: request.config.customizations,
     plugin_directories: activePlugins,
-    allow_plugin_tools: request.config.customizations === "safe"
-      ? false
-      : request.config.pluginTools,
+    allow_plugin_tools: request.config.customizations !== "safe",
     ...(request.config.model ? { model: request.config.model } : {}),
     ...(request.config.effort ? { effort: request.config.effort } : {}),
     ...(request.config.maxBudgetUsd ? { max_budget_usd: request.config.maxBudgetUsd } : {}),
   }, { allowPluginDirectories: true });
 }
 
-function runResultText(result) {
-  const metadata = {
-    ok: result.ok,
-    subtype: result.subtype ?? null,
-    session_id: result.session_id ?? null,
-    elapsed_ms: result.elapsed_ms,
-    total_cost_usd: result.total_cost_usd ?? null,
-    permission_denials: result.permission_denials ?? [],
-  };
-  const primary = result.result || (result.ok
-    ? "Claude Code 已完成，但没有返回文本。"
-    : "Claude Code 未成功完成，也没有返回文本。");
-  return `${primary}\n\n[Claude Code Bridge 元数据]\n${JSON.stringify(metadata, null, 2)}`;
-}
-
-async function spillLargeResult(dataRoot, sessionId, text, state) {
-  if (text.length <= MAX_INLINE_RESULT_CHARACTERS) {
-    return text;
-  }
-  const resultDirectory = path.join(dataRoot, "results", sessionId);
-  await mkdir(resultDirectory, { recursive: true, mode: 0o700 });
-  const resultPath = path.join(resultDirectory, `${randomUUID()}.md`);
-  await writeFile(resultPath, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  state.resultFiles.push(resultPath);
-  const head = text.slice(0, 8_000);
-  const tail = text.slice(-2_000);
-  return `${head}\n\n……中间内容已省略……\n\n${tail}\n\n完整结果：${resultPath}`;
-}
-
-async function executeRunRequest(request, context) {
-  const { dataRoot, sessionId, dependencies } = context;
-  const before = await readSession(dataRoot, sessionId);
-  await currentAuthorizedRoot(before, request.workingDirectory);
-  const input = await buildRunInput(request, before);
-  let result;
-  let attempted = false;
-  try {
-    result = await withStateLock(dataRoot, "global_claude", () => {
-      attempted = true;
-      return dependencies.runClaude(input, { environment: context.environment });
-    });
-  } finally {
-    if (attempted) {
-      await mutateSession(dataRoot, sessionId, async (state) => {
-        if (request.imageIds.length > 0) {
-          await clearQueuedImages(state, dataRoot, sessionId, request.imageIds);
-        }
-        state.forkNext = false;
-      });
-    }
-  }
-
-  return mutateSession(dataRoot, sessionId, async (state) => {
-    if (request.config.persistSession && typeof result.session_id === "string") {
-      state.claudeSessionId = result.session_id;
-      state.claudeSessionRoot = request.authorizationRoot;
-    }
-    return spillLargeResult(dataRoot, sessionId, runResultText(result), state);
-  });
-}
-
-function makeRequest(command, config, authorization) {
+function makeRequest(command, config, authorization, conversation, sessionPermission) {
   let prompt = command.prompt;
   if (command.kind === "skill-run" || command.kind === "image-skill") {
     const skill = validateSkillName(command.skill);
     prompt = `/${skill}${command.prompt.trim().length > 0 ? ` ${command.prompt}` : ""}`;
   }
-  const requestConfig = command.kind === "plan"
-    ? {
-        ...config,
-        customizations: "safe",
-        pluginTools: false,
-        persistSession: false,
-      }
-    : config;
+  const requestedPermission = command.kind === "plan"
+    ? "plan"
+    : command.permissionOverride ?? sessionPermission ?? config.permission;
+  if (!Object.hasOwn(PERMISSION_MAP, requestedPermission)) {
+    throw new CommandError(`权限模式只能是 ${PERMISSION_NAMES.join("、")}。`);
+  }
+  const requestConfig = command.kind === "plan" ? { ...config, persistSession: false } : config;
+  const composed = composePromptWithCodexConversation(prompt, conversation);
   return {
-    prompt,
+    prompt: composed.prompt,
+    conversation: {
+      available: conversation.available,
+      messageCount: conversation.messageCount,
+      truncated: conversation.truncated || composed.contextTruncated,
+      malformedLines: conversation.malformedLines,
+    },
     workingDirectory: authorization.cwd,
     authorizationRoot: authorization.root,
-    forcePlan: command.kind === "plan",
+    permissionName: canonicalPermissionName(requestedPermission),
     imageIds: [],
     config: JSON.parse(JSON.stringify(requestConfig)),
   };
@@ -465,7 +422,10 @@ function makeRequest(command, config, authorization) {
 async function stageOrRun(command, context, config) {
   const state = await readSession(context.dataRoot, context.sessionId);
   const authorization = await currentAuthorizedRoot(state, context.cwd);
-  const request = makeRequest(command, config, authorization);
+  const conversation = config.conversationContext
+    ? await readCodexConversation(context.transcriptPath, { currentPrompt: context.submittedPrompt })
+    : { available: false, text: "", messageCount: 0, truncated: false, malformedLines: 0 };
+  const request = makeRequest(command, config, authorization, conversation, state.sessionPermission);
   if (command.kind === "image-run" || command.kind === "image-skill") {
     if (state.images.length === 0) {
       throw new CommandError("图片队列为空。请先粘贴图片并执行 /claude image add。");
@@ -473,53 +433,8 @@ async function stageOrRun(command, context, config) {
     request.imageIds = state.images.map((image) => image.id);
   }
 
-  const modification = !request.forcePlan && config.permission !== "plan";
-  if (modification && config.approval === "deny") {
-    throw new CommandError("当前 approval=deny，已拒绝修改任务。可改为 ask 或 auto。");
-  }
-  if (modification && config.approval === "ask") {
-    const approvalId = randomUUID().replaceAll("-", "").slice(0, 8);
-    await mutateSession(context.dataRoot, context.sessionId, async (mutable) => {
-      if (mutable.pending) {
-        throw new CommandError(`已有待审批任务 ${mutable.pending.id}；请先 approve 或 cancel。`);
-      }
-      mutable.pending = {
-        id: approvalId,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + APPROVAL_TTL_MS,
-        request,
-      };
-    });
-    return [
-      "修改任务已暂存，尚未启动 Claude Code。",
-      requestSummary(request),
-      `15 分钟内批准：/claude approve ${approvalId}`,
-      `取消：/claude cancel ${approvalId}`,
-    ].join("\n");
-  }
-  return executeRunRequest(request, context);
-}
-
-async function approvePending(command, context) {
-  const request = await mutateSession(context.dataRoot, context.sessionId, async (state) => {
-    if (!state.pending || state.pending.id !== command.approvalId) {
-      throw new CommandError("没有找到该待审批任务，或任务已经过期。");
-    }
-    const selected = state.pending.request;
-    state.pending = null;
-    return selected;
-  });
-  return executeRunRequest(request, context);
-}
-
-async function cancelPending(command, context) {
-  return mutateSession(context.dataRoot, context.sessionId, async (state) => {
-    if (!state.pending || state.pending.id !== command.approvalId) {
-      throw new CommandError("没有找到该待审批任务，或任务已经过期。");
-    }
-    state.pending = null;
-    return `已取消待审批任务 ${command.approvalId}。图片仍保留在队列中。`;
-  });
+  const input = await buildRunInput(request, state);
+  return context.dependencies.startClaudeJob({ ...request, input }, context);
 }
 
 async function pluginName(pluginDirectory) {
@@ -605,6 +520,13 @@ async function discoverSkills(config, cwd, dependencies) {
 async function cleanupSession(dataRoot, sessionId) {
   await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
     const state = await loadSessionState(dataRoot, sessionId);
+    if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+      state.sessionEnded = true;
+      state.activeJob.cancelRequested = true;
+      state.activeJob.updatedAt = Date.now();
+      await saveSessionState(dataRoot, sessionId, state);
+      return;
+    }
     await clearQueuedImages(state, dataRoot, sessionId);
     const resultRoot = path.join(dataRoot, "results", sessionId);
     for (const resultPath of state.resultFiles) {
@@ -629,9 +551,10 @@ async function executeCommand(command, context) {
     case "help":
       return HELP_TEXT;
     case "status": {
-      const [health, state] = await Promise.all([
+      const [health, state, jobStatus] = await Promise.all([
         context.dependencies.getClaudeHealth({ environment: context.environment }),
         readSession(context.dataRoot, context.sessionId),
+        context.dependencies.describeClaudeJob(context),
       ]);
       const authorization = state.authorization
         ? `${state.authorization.root}（到期 ${new Date(state.authorization.expiresAt).toLocaleString("zh-CN")}）`
@@ -641,8 +564,9 @@ async function executeCommand(command, context) {
         `认证：${health.authenticated ? "已登录" : "未登录或无法确认"}`,
         `目录：${authorization}`,
         `图片队列：${state.images.length} 张`,
-        `待审批：${state.pending?.id ?? "无"}`,
+        `后台任务：${jobStatus}`,
         `Claude 会话：${state.claudeSessionId ?? "未持久化"}`,
+        `当前 Codex 会话权限覆盖：${state.sessionPermission ?? "无（使用全局默认）"}`,
         "",
         configDisplay(config),
       ].join("\n");
@@ -663,6 +587,18 @@ async function executeCommand(command, context) {
         await saveCommandConfig(context.dataRoot, updated);
         return `设置已重置。\n${configDisplay(updated)}`;
       });
+    case "mode":
+      return mutateSession(context.dataRoot, context.sessionId, async (state) => {
+        if (command.value === "default") {
+          state.sessionPermission = null;
+          return `当前 Codex 会话已恢复使用全局默认权限模式：${config.permission}。`;
+        }
+        if (!Object.hasOwn(PERMISSION_MAP, command.value)) {
+          throw new CommandError(`权限模式只能是 default、${PERMISSION_NAMES.join("、")}。`);
+        }
+        state.sessionPermission = canonicalPermissionName(command.value);
+        return `当前 Codex 会话的 Claude 权限模式已设为：${state.sessionPermission}。\n正在运行的任务不改变；后续任务立即使用该模式。`;
+      });
     case "access-allow": {
       const requested = command.directory === undefined || command.directory === "."
         ? context.cwd
@@ -670,16 +606,18 @@ async function executeCommand(command, context) {
       const authorizedRoot = await normalizeAuthorizationInput({ directory: requested });
       const expiresAt = Date.now() + AUTHORIZATION_TTL_MS;
       await mutateSession(context.dataRoot, context.sessionId, async (state) => {
+        if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+          throw new CommandError(`Claude Code 任务 ${state.activeJob.id} 正在运行，不能更换授权目录。`);
+        }
         const changed = state.authorization && !pathsEqual(state.authorization.root, authorizedRoot);
         state.authorization = { root: authorizedRoot, expiresAt };
         if (changed) {
-          state.pending = null;
           state.claudeSessionId = null;
           state.claudeSessionRoot = null;
           state.forkNext = false;
         }
       });
-      return `已授权目录：${authorizedRoot}\n授权有效期：4 小时。更换根目录会清除待审批任务和 Claude 恢复会话。`;
+      return `已授权目录：${authorizedRoot}\n授权有效期：4 小时。更换根目录会清除 Claude 恢复会话。`;
     }
     case "access-show": {
       const state = await readSession(context.dataRoot, context.sessionId);
@@ -688,12 +626,14 @@ async function executeCommand(command, context) {
     }
     case "access-revoke":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
+        if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+          throw new CommandError(`Claude Code 任务 ${state.activeJob.id} 正在运行；请先取消或等待它结束。`);
+        }
         state.authorization = null;
-        state.pending = null;
         state.claudeSessionId = null;
         state.claudeSessionRoot = null;
         state.forkNext = false;
-        return "目录授权已撤销；待审批任务和 Claude 恢复会话已清除。图片队列未删除。";
+        return "目录授权已撤销；Claude 恢复会话已清除。图片队列未删除。";
       });
     case "image-add":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
@@ -710,8 +650,8 @@ async function executeCommand(command, context) {
     }
     case "image-clear":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
-        if (state.pending?.request?.imageIds?.length) {
-          throw new CommandError("当前有待审批的图片任务；请先 approve 或 cancel，再清空队列。");
+        if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+          throw new CommandError("当前有 Claude Code 任务在使用图片队列；请先等待或取消任务，再清空队列。");
         }
         const removed = await clearQueuedImages(state, context.dataRoot, context.sessionId);
         return `已清除 ${removed} 张排队图片。`;
@@ -722,10 +662,14 @@ async function executeCommand(command, context) {
     case "skill-run":
     case "image-skill":
       return stageOrRun(command, context, config);
-    case "approve":
-      return approvePending(command, context);
+    case "allow":
+    case "deny":
+    case "answer":
+      return context.dependencies.resolveClaudeApproval(command, context);
     case "cancel":
-      return cancelPending(command, context);
+      return context.dependencies.cancelClaudeJob(command, context);
+    case "result":
+      return context.dependencies.readClaudeJobResult(context);
     case "plugin-add": {
       const requested = path.resolve(context.cwd, command.value);
       const [normalized] = await normalizePluginDirectories([requested]);
@@ -779,7 +723,7 @@ async function executeCommand(command, context) {
         "Claude Code 已安装插件：",
         ...installedLines,
         "",
-        `当前 customizations=${config.customizations}，plugin-tools=${config.pluginTools ? "on" : "off"}。`,
+        `当前 customizations=${config.customizations}。确定性命令使用 Claude 原生工具和权限流程。`,
       ].join("\n");
     }
     case "skill-list": {
@@ -795,6 +739,7 @@ async function executeCommand(command, context) {
         `session-id: ${state.claudeSessionId ?? "无"}`,
         `bound-root: ${state.claudeSessionRoot ?? "无"}`,
         `fork-next: ${state.forkNext ? "on" : "off"}`,
+        `session-permission: ${state.sessionPermission ?? "default"}`,
       ].join("\n");
     }
     case "session-clear":
@@ -847,32 +792,38 @@ export async function handleHookEvent(input, options = {}) {
   try {
     command = parseClaudeCommand(input.prompt);
   } catch (error) {
-    return { decision: "block", reason: `Claude Code Bridge 命令错误：${errorMessage(error)}` };
+    return { decision: "block", reason: `Codex Claude Code Bridge 命令错误：${errorMessage(error)}` };
   }
   if (command === null) {
     return null;
   }
 
   if (typeof input.session_id !== "string" || typeof input.cwd !== "string") {
-    return { decision: "block", reason: "Claude Code Bridge 缺少当前任务或工作目录信息。" };
+    return { decision: "block", reason: "Codex Claude Code Bridge 缺少当前任务或工作目录信息。" };
   }
 
   const dependencies = {
-    runClaude: options.runClaude ?? runClaude,
     getClaudeHealth: options.getClaudeHealth ?? getClaudeHealth,
     getClaudePluginInventory: options.getClaudePluginInventory ?? getClaudePluginInventory,
     captureClipboard: options.captureClipboard,
+    startClaudeJob: options.startClaudeJob ?? startClaudeJob,
+    describeClaudeJob: options.describeClaudeJob ?? describeClaudeJob,
+    readClaudeJobResult: options.readClaudeJobResult ?? readClaudeJobResult,
+    resolveClaudeApproval: options.resolveClaudeApproval ?? resolveClaudeApproval,
+    cancelClaudeJob: options.cancelClaudeJob ?? cancelClaudeJob,
   };
   try {
     const reason = await executeCommand(command, {
       dataRoot,
       sessionId: input.session_id,
       cwd: input.cwd,
+      transcriptPath: input.transcript_path,
+      submittedPrompt: input.prompt,
       environment: options.environment ?? process.env,
       dependencies,
     });
     return { decision: "block", reason };
   } catch (error) {
-    return { decision: "block", reason: `Claude Code Bridge 失败：${errorMessage(error)}` };
+    return { decision: "block", reason: `Codex Claude Code Bridge 失败：${errorMessage(error)}` };
   }
 }

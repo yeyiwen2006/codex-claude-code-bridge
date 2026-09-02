@@ -13,7 +13,7 @@ import {
 let temporaryDirectory;
 
 before(async () => {
-  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "claude-code-bridge-validation-"));
+  temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-validation-"));
 });
 
 after(async () => {
@@ -43,15 +43,15 @@ test("rejects relative working directories", async () => {
   );
 });
 
-test("rejects bypass permission mode", async () => {
-  await assert.rejects(
-    normalizeRunInput({
+test("accepts all native Claude permission modes, including bypass", async () => {
+  for (const permissionMode of ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]) {
+    const input = await normalizeRunInput({
       prompt: "test",
       working_directory: temporaryDirectory,
-      permission_mode: "bypassPermissions",
-    }),
-    (error) => error instanceof InputError && /permission_mode/.test(error.message),
-  );
+      permission_mode: permissionMode,
+    });
+    assert.equal(input.permissionMode, permissionMode);
+  }
 });
 
 test("requires a session id before forking", async () => {

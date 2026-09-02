@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PLUGIN_NAME = "claude-code-bridge";
+const PLUGIN_NAME = "codex-claude-code-bridge";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(scriptDirectory, "..");
 const expectedPluginRoot = path.join(os.homedir(), "plugins", PLUGIN_NAME);
@@ -76,9 +76,9 @@ if (!marketplace.interface || typeof marketplace.interface !== "object") {
 
 await mkdir(path.dirname(marketplacePath), { recursive: true });
 if (existingText !== undefined) {
-  await copyFile(marketplacePath, `${marketplacePath}.claude-code-bridge.bak`);
+  await copyFile(marketplacePath, `${marketplacePath}.codex-claude-code-bridge.bak`);
 }
-const temporaryPath = `${marketplacePath}.claude-code-bridge.tmp`;
+const temporaryPath = `${marketplacePath}.codex-claude-code-bridge.tmp`;
 await writeFile(temporaryPath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
 await rename(temporaryPath, marketplacePath);
 

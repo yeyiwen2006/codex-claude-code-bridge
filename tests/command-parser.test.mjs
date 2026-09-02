@@ -18,6 +18,28 @@ test("parses a raw task after the command terminator", () => {
   });
 });
 
+test("parses native permission modes and runtime approval commands", () => {
+  assert.deepEqual(parseClaudeCommand("/claude run --permission bypass -- 执行任务"), {
+    kind: "run",
+    prompt: "执行任务",
+    permissionOverride: "bypass",
+  });
+  assert.deepEqual(parseClaudeCommand("/claude mode accept-edits"), {
+    kind: "mode",
+    value: "accept-edits",
+  });
+  assert.deepEqual(parseClaudeCommand("/claude allow a1b2c3d4 session"), {
+    kind: "allow",
+    approvalId: "a1b2c3d4",
+    scope: "session",
+  });
+  assert.deepEqual(parseClaudeCommand("/claude deny a1b2c3d4 -- 不要删除"), {
+    kind: "deny",
+    approvalId: "a1b2c3d4",
+    reason: "不要删除",
+  });
+});
+
 test("parses quoted plugin paths without shell expansion", () => {
   assert.deepEqual(parseClaudeCommand('/claude plugin add "C:\\My Plugins\\reviewer"'), {
     kind: "plugin-add",

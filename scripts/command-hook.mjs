@@ -21,6 +21,6 @@ try {
   const message = error instanceof Error ? error.message : String(error);
   process.stdout.write(`${JSON.stringify({
     decision: "block",
-    reason: `Claude Code Bridge Hook 失败：${message}`,
+    reason: `Codex Claude Code Bridge Hook 失败：${message}`,
   })}\n`);
 }

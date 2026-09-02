@@ -1,9 +1,9 @@
 {
-  "name": "claude-code-bridge",
-  "version": "0.2.0",
-  "description": "Run local Claude Code from deterministic Codex commands, with guarded MCP fallback and a multi-image clipboard queue.",
+  "name": "codex-claude-code-bridge",
+  "version": "0.3.1",
+  "description": "Run Claude Code from deterministic Codex commands with native runtime permissions, visible conversation inheritance, and multi-image clipboard handoff.",
   "author": {
-    "name": "Claude Code Bridge contributors"
+    "name": "Codex Claude Code Bridge contributors"
   },
   "license": "MIT",
   "keywords": [
@@ -15,14 +15,16 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Claude Code Bridge",
-    "shortDescription": "Deterministic /claude commands with multi-image handoff.",
-    "longDescription": "A local bridge that intercepts explicit /claude commands before the Codex model, invokes an already-installed Claude Code CLI, queues multiple Windows clipboard images without manual saving, controls models and permissions, and keeps an MCP/Skill fallback for model-directed use.",
-    "developerName": "Claude Code Bridge contributors",
+    "displayName": "Codex Claude Code Bridge",
+    "shortDescription": "Claude Code commands with native permissions and image handoff.",
+    "longDescription": "A local bridge that intercepts explicit /claude commands before the Codex model, runs Claude Code with its official permission-prompt MCP interface and all native permission modes, inherits visible Codex conversation, queues multiple Windows clipboard images without manual saving, and keeps a guarded MCP/Skill fallback for model-directed use.",
+    "developerName": "Codex Claude Code Bridge contributors",
     "category": "DeveloperTools",
     "capabilities": [
       "Deterministic commands",
+      "Visible conversation inheritance",
       "Multi-image clipboard queue",
+      "Native runtime approvals",
       "Tool calling",
       "File editing",
       "Claude plugins and Skills"
