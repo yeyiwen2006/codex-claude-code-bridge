@@ -116,4 +116,25 @@ test("clears canonical image paths when the data root is a filesystem alias", as
   assert.equal(await clearQueuedImages(state, aliasRoot, sessionId), 1);
   await assert.rejects(access(storedPath));
   assert.equal(state.images.length, 0);
+
+  let invalidPath;
+  const invalidCaptureFunction = async (destination) => {
+    await mkdir(destination, { recursive: true });
+    invalidPath = path.join(destination, "invalid.png");
+    await writeFile(invalidPath, "not an image", "utf8");
+    return {
+      clipboardSequence: "101",
+      items: [{
+        path: invalidPath,
+        sourceName: "invalid.png",
+        sourceFormat: "test",
+        byteExact: true,
+      }],
+    };
+  };
+  await assert.rejects(
+    addClipboardImages(state, aliasRoot, sessionId, { captureFunction: invalidCaptureFunction }),
+    (error) => error instanceof InputError && /supported PNG/.test(error.message),
+  );
+  await assert.rejects(access(invalidPath));
 });

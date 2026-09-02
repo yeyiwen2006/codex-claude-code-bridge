@@ -70,7 +70,12 @@ async function removeCaptured(items, destination) {
     if (typeof item?.path !== "string") {
       continue;
     }
-    const resolved = path.resolve(item.path);
+    let resolved;
+    try {
+      resolved = await realpath(item.path);
+    } catch {
+      continue;
+    }
     if (pathIsWithinRoot(canonicalDestination, resolved)) {
       await unlink(resolved).catch(() => {});
     }
