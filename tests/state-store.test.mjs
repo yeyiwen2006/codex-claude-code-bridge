@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,25 @@ test("reclaims a lock immediately when its owner process no longer exists", asyn
     const result = await withStateLock(dataRoot, "dead_owner", async () => "recovered");
     assert.equal(result, "recovered");
     assert.ok(Date.now() - startedAt < 1_000, "dead lock recovery should not wait for the normal lock timeout");
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("waits for a lock owned by a running process instead of reclaiming it", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-lock-"));
+  try {
+    const lockDirectory = path.join(dataRoot, "locks");
+    const lockPath = path.join(lockDirectory, "live_owner.lock");
+    await mkdir(lockDirectory, { recursive: true });
+    await writeFile(lockPath, `${process.pid}\n`, "utf8");
+    const release = setTimeout(() => void unlink(lockPath).catch(() => {}), 150);
+
+    const startedAt = Date.now();
+    const result = await withStateLock(dataRoot, "live_owner", async () => "acquired-after-release");
+    clearTimeout(release);
+    assert.equal(result, "acquired-after-release");
+    assert.ok(Date.now() - startedAt >= 100, "a lock owned by a running process must not be reclaimed early");
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

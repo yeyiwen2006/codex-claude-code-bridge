@@ -207,6 +207,7 @@ test("rejects session mutation commands while a Claude job is active", async () 
   }, { environment });
 
   assert.match((await submit("/claude session clear")).reason, /任务 a1b2c3d4 正在运行/);
+  assert.match((await submit("/claude session new")).reason, /任务 a1b2c3d4 正在运行/);
   assert.match((await submit("/claude session fork")).reason, /任务 a1b2c3d4 正在运行/);
   const state = await loadSessionState(pluginData, sessionId);
   assert.equal(state.claudeSessionId, "11111111-2222-4333-8444-555555555555");
