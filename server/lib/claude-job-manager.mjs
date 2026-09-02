@@ -194,6 +194,13 @@ export async function resolveClaudeApproval(command, context) {
     ) {
       throw new Error("没有找到该权限请求；它可能已处理、过期或不属于当前 Codex 会话。");
     }
+    const isQuestion = job.pendingApproval.toolName === "AskUserQuestion";
+    if (command.kind === "answer" && !isQuestion) {
+      throw new Error("/claude answer 只能处理 AskUserQuestion；普通工具请求请使用 allow 或 deny。");
+    }
+    if (command.kind === "allow" && isQuestion) {
+      throw new Error("AskUserQuestion 需要使用 /claude answer 提交回答，或使用 deny 拒绝。");
+    }
     job.decision = {
       approvalId: command.approvalId,
       action: command.kind,

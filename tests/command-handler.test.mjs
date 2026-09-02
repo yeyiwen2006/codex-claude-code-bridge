@@ -4,6 +4,11 @@ import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { handleHookEvent } from "../server/lib/command-handler.mjs";
+import {
+  defaultSessionState,
+  loadSessionState,
+  saveSessionState,
+} from "../server/lib/state-store.mjs";
 
 const PNG_1X1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -174,4 +179,36 @@ test("intercepts commands, queues multiple images in order, and runs without a C
     cwd: projectDirectory,
   }, dependencies);
   await assert.rejects(access(path.join(pluginData, "state", "sessions", `${sessionId}.json`)));
+});
+
+test("rejects session mutation commands while a Claude job is active", async () => {
+  const sessionId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+  const environment = { ...process.env, PLUGIN_DATA: pluginData };
+  await saveSessionState(pluginData, sessionId, {
+    ...defaultSessionState(),
+    claudeSessionId: "11111111-2222-4333-8444-555555555555",
+    claudeSessionRoot: projectDirectory,
+    activeJob: {
+      id: "a1b2c3d4",
+      status: "running",
+      pendingApproval: null,
+      decision: null,
+      cancelRequested: false,
+      resultPath: null,
+      error: null,
+    },
+  });
+
+  const submit = (prompt) => handleHookEvent({
+    hook_event_name: "UserPromptSubmit",
+    session_id: sessionId,
+    cwd: projectDirectory,
+    prompt,
+  }, { environment });
+
+  assert.match((await submit("/claude session clear")).reason, /任务 a1b2c3d4 正在运行/);
+  assert.match((await submit("/claude session fork")).reason, /任务 a1b2c3d4 正在运行/);
+  const state = await loadSessionState(pluginData, sessionId);
+  assert.equal(state.claudeSessionId, "11111111-2222-4333-8444-555555555555");
+  assert.equal(state.forkNext, false);
 });

@@ -106,3 +106,57 @@ for (const command of [
     }
   });
 }
+
+for (const mismatch of [
+  {
+    name: "answer for a non-question tool",
+    toolName: "Bash",
+    command: { kind: "answer", approvalId, answers: { question: "answer" } },
+    message: /只能处理 AskUserQuestion/,
+  },
+  {
+    name: "allow for AskUserQuestion",
+    toolName: "AskUserQuestion",
+    command: { kind: "allow", approvalId, scope: "once" },
+    message: /需要使用 \/claude answer/,
+  },
+]) {
+  test(`rejects ${mismatch.name}`, async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-manager-"));
+    try {
+      await saveSessionState(dataRoot, sessionId, {
+        version: 1,
+        authorization: null,
+        images: [],
+        lastClipboardSequence: null,
+        activeJob: {
+          id: jobId,
+          status: "waiting",
+          pendingApproval: {
+            id: approvalId,
+            toolName: mismatch.toolName,
+            inputText: "{}",
+          },
+          decision: null,
+          cancelRequested: false,
+          resultPath: null,
+          error: null,
+        },
+        sessionPermission: null,
+        sessionEnded: false,
+        claudeSessionId: null,
+        claudeSessionRoot: null,
+        forkNext: false,
+        resultFiles: [],
+      });
+
+      await assert.rejects(
+        resolveClaudeApproval(mismatch.command, { dataRoot, sessionId }),
+        mismatch.message,
+      );
+      assert.equal((await loadSessionState(dataRoot, sessionId)).activeJob.decision, null);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+}

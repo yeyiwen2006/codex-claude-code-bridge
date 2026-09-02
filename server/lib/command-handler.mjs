@@ -745,6 +745,9 @@ async function executeCommand(command, context) {
     case "session-clear":
     case "session-new":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
+        if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+          throw new CommandError(`Claude Code 任务 ${state.activeJob.id} 正在运行；请先等待或取消它，再清除会话。`);
+        }
         state.claudeSessionId = null;
         state.claudeSessionRoot = null;
         state.forkNext = false;
@@ -752,6 +755,9 @@ async function executeCommand(command, context) {
       });
     case "session-fork":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
+        if (state.activeJob && ["starting", "running", "waiting"].includes(state.activeJob.status)) {
+          throw new CommandError(`Claude Code 任务 ${state.activeJob.id} 正在运行；请先等待或取消它，再设置会话分叉。`);
+        }
         if (!state.claudeSessionId) {
           throw new CommandError("当前没有可分叉的 Claude 会话。先启用 persist-session 并成功运行一次。");
         }

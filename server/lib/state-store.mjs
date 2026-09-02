@@ -129,6 +129,28 @@ async function delay(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function lockOwnerIsRunning(lockPath) {
+  let ownerText;
+  try {
+    ownerText = await readFile(lockPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return false;
+    }
+    return true;
+  }
+  const ownerPid = Number(ownerText.trim());
+  if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
+    return true;
+  }
+  try {
+    process.kill(ownerPid, 0);
+    return true;
+  } catch (error) {
+    return !(error && typeof error === "object" && error.code === "ESRCH");
+  }
+}
+
 async function acquireLock(dataRoot, name) {
   validateIdentifier(name, "Lock name");
   await ensureDataDirectories(dataRoot);
@@ -145,7 +167,7 @@ async function acquireLock(dataRoot, name) {
       }
       try {
         const details = await stat(lockPath);
-        if (Date.now() - details.mtimeMs > LOCK_STALE_MS) {
+        if (Date.now() - details.mtimeMs > LOCK_STALE_MS || !(await lockOwnerIsRunning(lockPath))) {
           await unlink(lockPath);
           continue;
         }
