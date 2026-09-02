@@ -59,12 +59,19 @@ function identifyImage(buffer) {
 }
 
 async function removeCaptured(items, destination) {
+  let canonicalDestination;
+  try {
+    canonicalDestination = await realpath(destination);
+  } catch {
+    // Without a canonical private root, no captured path is safe to remove.
+    return;
+  }
   for (const item of items) {
     if (typeof item?.path !== "string") {
       continue;
     }
     const resolved = path.resolve(item.path);
-    if (pathIsWithinRoot(destination, resolved)) {
+    if (pathIsWithinRoot(canonicalDestination, resolved)) {
       await unlink(resolved).catch(() => {});
     }
   }
@@ -178,6 +185,16 @@ export async function addClipboardImages(state, dataRoot, sessionId, options = {
 
 export async function clearQueuedImages(state, dataRoot, sessionId, selectedIds) {
   const destination = sessionImageDirectory(dataRoot, sessionId);
+  let canonicalDestination;
+  try {
+    canonicalDestination = await realpath(destination);
+  } catch (error) {
+    if (state.images.length === 0 && error && typeof error === "object" && error.code === "ENOENT") {
+      state.lastClipboardSequence = null;
+      return 0;
+    }
+    throw new InputError("The private session image directory is unavailable; refusing to remove queued paths.");
+  }
   const selected = selectedIds === undefined ? null : new Set(selectedIds);
   const kept = [];
   let removed = 0;
@@ -187,7 +204,7 @@ export async function clearQueuedImages(state, dataRoot, sessionId, selectedIds)
       continue;
     }
     const resolved = path.resolve(image.storedPath);
-    if (!pathIsWithinRoot(destination, resolved)) {
+    if (!pathIsWithinRoot(canonicalDestination, resolved)) {
       throw new InputError("Refusing to remove an image outside the private session queue.");
     }
     await unlink(resolved).catch((error) => {

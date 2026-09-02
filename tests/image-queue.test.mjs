@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -86,5 +86,34 @@ test("rejects non-image clipboard bytes", async () => {
     (error) => error instanceof InputError && /supported PNG/.test(error.message),
   );
   await assert.rejects(access(invalidPath));
+  assert.equal(state.images.length, 0);
+});
+
+test("clears canonical image paths when the data root is a filesystem alias", async () => {
+  const canonicalRoot = path.join(temporaryRoot, "canonical-root");
+  const aliasRoot = path.join(temporaryRoot, "alias-root");
+  await mkdir(canonicalRoot, { recursive: true });
+  await symlink(canonicalRoot, aliasRoot, process.platform === "win32" ? "junction" : "dir");
+  const sessionId = "cccccccc-2222-4333-8444-dddddddddddd";
+  const state = { images: [], lastClipboardSequence: null };
+  const captureFunction = async (destination) => {
+    await mkdir(destination, { recursive: true });
+    const filePath = path.join(destination, "aliased.png");
+    await writeFile(filePath, PNG_1X1);
+    return {
+      clipboardSequence: "100",
+      items: [{
+        path: filePath,
+        sourceName: "aliased.png",
+        sourceFormat: "test",
+        byteExact: true,
+      }],
+    };
+  };
+
+  await addClipboardImages(state, aliasRoot, sessionId, { captureFunction });
+  const storedPath = state.images[0].storedPath;
+  assert.equal(await clearQueuedImages(state, aliasRoot, sessionId), 1);
+  await assert.rejects(access(storedPath));
   assert.equal(state.images.length, 0);
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,7 @@ test("loads explicit plugins without user or project setting sources", async () 
   const pluginIndex = argumentsList.indexOf("--plugin-dir");
 
   assert.equal(argumentsList[settingSourcesIndex + 1], "");
-  assert.equal(argumentsList[pluginIndex + 1], temporaryDirectory);
+  assert.equal(argumentsList[pluginIndex + 1], await realpath(temporaryDirectory));
   assert.ok(argumentsList.includes("Bash,PowerShell,WebFetch,WebSearch"));
   assert.equal(argumentsList.includes("Bash,PowerShell,WebFetch,WebSearch,mcp__*"), false);
 });
