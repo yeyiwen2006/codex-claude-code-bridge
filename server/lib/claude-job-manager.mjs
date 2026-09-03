@@ -54,22 +54,22 @@ function spawnWorker(dataRoot, sessionId, jobId, environment) {
 
 export function approvalText(job) {
   if (job.decision) {
-    return `权限决定 ${job.decision.action} 已提交；Claude Code 任务 ${job.id} 正在从暂停处恢复。可用 /claude status 查看进度，或 /claude cancel ${job.id} 取消。`;
+    return `权限决定 ${job.decision.action} 已提交；Claude Code 任务 ${job.id} 正在从暂停处恢复。可用 claude status 查看进度，或 claude cancel ${job.id} 取消。`;
   }
   const pending = job.pendingApproval;
   if (!pending) {
-    return `Claude Code 任务 ${job.id} 正在运行。可用 /claude status 查看进度，或 /claude cancel ${job.id} 取消。`;
+    return `Claude Code 任务 ${job.id} 正在运行。可用 claude status 查看进度，或 claude cancel ${job.id} 取消。`;
   }
   const commands = pending.toolName === "AskUserQuestion"
     ? [
-        `/claude answer ${pending.id} -- {"问题原文":"选项或回答"}`,
-        `/claude deny ${pending.id} -- 不回答此问题`,
+        `claude answer ${pending.id} -- {"问题原文":"选项或回答"}`,
+        `claude deny ${pending.id} -- 不回答此问题`,
       ]
     : [
-        `/claude allow ${pending.id} once`,
-        `/claude allow ${pending.id} session`,
-        `/claude allow ${pending.id} project`,
-        `/claude deny ${pending.id} -- <原因>`,
+        `claude allow ${pending.id} once`,
+        `claude allow ${pending.id} session`,
+        `claude allow ${pending.id} project`,
+        `claude deny ${pending.id} -- <原因>`,
       ];
   return [
     `Claude Code 已运行到一个真实的权限请求（任务 ${job.id}），原进程正在等待：`,
@@ -169,7 +169,7 @@ export async function describeClaudeJob(context) {
   if (!job) return "无";
   if (job.status === "waiting") return `等待审批 ${job.pendingApproval?.id ?? "?"}（任务 ${job.id}）`;
   if (["completed", "failed", "cancelled"].includes(job.status)) {
-    return `${job.status}（任务 ${job.id}；发送 /claude result 读取结果）`;
+    return `${job.status}（任务 ${job.id}；发送 claude result 读取结果）`;
   }
   return `${job.status}（任务 ${job.id}）`;
 }
@@ -196,10 +196,10 @@ export async function resolveClaudeApproval(command, context) {
     }
     const isQuestion = job.pendingApproval.toolName === "AskUserQuestion";
     if (command.kind === "answer" && !isQuestion) {
-      throw new Error("/claude answer 只能处理 AskUserQuestion；普通工具请求请使用 allow 或 deny。");
+      throw new Error("claude answer 只能处理 AskUserQuestion；普通工具请求请使用 allow 或 deny。");
     }
     if (command.kind === "allow" && isQuestion) {
-      throw new Error("AskUserQuestion 需要使用 /claude answer 提交回答，或使用 deny 拒绝。");
+      throw new Error("AskUserQuestion 需要使用 claude answer 提交回答，或使用 deny 拒绝。");
     }
     job.decision = {
       approvalId: command.approvalId,

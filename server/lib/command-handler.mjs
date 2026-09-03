@@ -85,56 +85,60 @@ function canonicalPermissionName(value) {
 
 const HELP_TEXT = `Codex Claude Code Bridge 命令（由 Hook 直接执行，不调用 Codex 模型）
 
+Codex App 与 CLI 通用：claude ...
+Codex App 兼容别名：/claude ...
+Codex CLI 会把未知 / 命令拦在 Hook 之前，因此 CLI 请勿添加斜杠。
+
 基础
-  /claude help
-  /claude status
+  claude help
+  claude status
 
 目录访问
-  /claude access allow [绝对路径|.]
-  /claude access show
-  /claude access revoke
+  claude access allow [绝对路径|.]
+  claude access show
+  claude access revoke
 
 运行
-  /claude plan -- <提示词>
-  /claude run [--permission <模式>] -- <提示词>
-  /claude allow <权限请求 ID> [once|session|project|user]
-  /claude deny <权限请求 ID> -- [原因]
-  /claude answer <权限请求 ID> -- <JSON 回答对象>
-  /claude cancel [任务 ID]
-  /claude result
+  claude plan -- <提示词>
+  claude run [--permission <模式>] -- <提示词>
+  claude allow <权限请求 ID> [once|session|project|user]
+  claude deny <权限请求 ID> -- [原因]
+  claude answer <权限请求 ID> -- <JSON 回答对象>
+  claude cancel [任务 ID]
+  claude result
 
 多图
-  先粘贴图片，再发送 /claude image add
+  先粘贴图片，再发送 claude image add
   每张位图重复一次；一次复制多个图片文件时会一次全部加入
-  /claude image list
-  /claude image run -- <提示词>
-  /claude image skill <Skill 名称> -- [参数]
-  /claude image clear
+  claude image list
+  claude image run -- <提示词>
+  claude image skill <Skill 名称> -- [参数]
+  claude image clear
 
 设置
-  /claude config show
-  /claude config set model <default|别名|完整模型名>
-  /claude config set effort <default|low|medium|high|xhigh|max>
-  /claude config set permission <manual|accept-edits|plan|auto|dont-ask|bypass>
-  /claude mode <default|manual|accept-edits|plan|auto|dont-ask|bypass>
-  /claude config set customizations <safe|plugin-only|user|project|all>
-  /claude config set timeout-seconds <1..3600>
-  /claude config set max-budget-usd <off|正数>
-  /claude config set persist-session <on|off>
-  /claude config set conversation-context <on|off>
-  /claude config reset [键|all]
+  claude config show
+  claude config set model <default|别名|完整模型名>
+  claude config set effort <default|low|medium|high|xhigh|max>
+  claude config set permission <manual|accept-edits|plan|auto|dont-ask|bypass>
+  claude mode <default|manual|accept-edits|plan|auto|dont-ask|bypass>
+  claude config set customizations <safe|plugin-only|user|project|all>
+  claude config set timeout-seconds <1..3600>
+  claude config set max-budget-usd <off|正数>
+  claude config set persist-session <on|off>
+  claude config set conversation-context <on|off>
+  claude config reset [键|all]
 
 Claude 插件与 Skills
-  /claude plugin list
-  /claude plugin add "<插件目录或 .zip 的绝对路径>"
-  /claude plugin remove <序号|绝对路径>
-  /claude skill list
-  /claude skill run <Skill 名称> -- [参数]
+  claude plugin list
+  claude plugin add "<插件目录或 .zip 的绝对路径>"
+  claude plugin remove <序号|绝对路径>
+  claude skill list
+  claude skill run <Skill 名称> -- [参数]
 
 会话
-  /claude session show
-  /claude session clear
-  /claude session fork
+  claude session show
+  claude session clear
+  claude session fork
 
 权限说明
   manual 只在 Claude 真实请求权限时暂停；批准后同一进程从原处继续。
@@ -154,10 +158,10 @@ function onOff(value, key) {
 function validateConfig(config) {
   const candidate = { ...DEFAULT_COMMAND_CONFIG, ...config };
   if (candidate.model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(candidate.model)) {
-    throw new InputError("本地配置中的 model 无效；请执行 /claude config reset model。");
+    throw new InputError("本地配置中的 model 无效；请执行 claude config reset model。");
   }
   if (candidate.effort !== null && !EFFORT_LEVELS.includes(candidate.effort)) {
-    throw new InputError("本地配置中的 effort 无效；请执行 /claude config reset effort。");
+    throw new InputError("本地配置中的 effort 无效；请执行 claude config reset effort。");
   }
   if (!Object.hasOwn(PERMISSION_MAP, candidate.permission)) {
     throw new InputError("本地配置中的 permission 无效；请重置该设置。");
@@ -328,10 +332,10 @@ async function readSession(dataRoot, sessionId) {
 
 async function currentAuthorizedRoot(state, cwd) {
   if (!state.authorization) {
-    throw new CommandError("尚未授权项目目录。请先执行 /claude access allow .");
+    throw new CommandError("尚未授权项目目录。请先执行 claude access allow .");
   }
   if (state.authorization.expiresAt <= Date.now()) {
-    throw new CommandError("目录授权已过期。请重新执行 /claude access allow .");
+    throw new CommandError("目录授权已过期。请重新执行 claude access allow .");
   }
   let canonicalCwd;
   try {
@@ -428,7 +432,7 @@ async function stageOrRun(command, context, config) {
   const request = makeRequest(command, config, authorization, conversation, state.sessionPermission);
   if (command.kind === "image-run" || command.kind === "image-skill") {
     if (state.images.length === 0) {
-      throw new CommandError("图片队列为空。请先粘贴图片并执行 /claude image add。");
+      throw new CommandError("图片队列为空。请先粘贴图片并执行 claude image add。");
     }
     request.imageIds = state.images.map((image) => image.id);
   }
@@ -698,7 +702,7 @@ async function executeCommand(command, context) {
           index = current.pluginDirectories.findIndex((entry) => pathsEqual(entry, requested));
         }
         if (index < 0 || index >= current.pluginDirectories.length) {
-          throw new CommandError("没有找到要移除的插件路径。可先执行 /claude plugin list。");
+          throw new CommandError("没有找到要移除的插件路径。可先执行 claude plugin list。");
         }
         const removed = current.pluginDirectories[index];
         const updated = {

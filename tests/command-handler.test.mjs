@@ -124,9 +124,11 @@ test("intercepts commands, queues multiple images in order, and runs without a C
   }, dependencies);
 
   assert.equal(await submit("普通 Codex 消息"), null);
+  assert.equal(await submit("claude is expensive"), null);
   assert.match((await submit("/claude help")).reason, /不调用 Codex 模型/);
-  assert.match((await submit("/claude access allow .")).reason, /已授权目录/);
-  assert.match((await submit("/claude status")).reason, /自定义 ANTHROPIC_BASE_URL/);
+  assert.match((await submit("claude help")).reason, /CLI 请勿添加斜杠/);
+  assert.match((await submit("claude access allow .")).reason, /已授权目录/);
+  assert.match((await submit("claude status")).reason, /自定义 ANTHROPIC_BASE_URL/);
   assert.match((await submit("/claude config set permission manual")).reason, /permission: manual/);
 
   const attachmentWrappedAdd = [

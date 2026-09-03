@@ -28,13 +28,21 @@ function attachmentPrompt(request, files = [
 test("leaves ordinary prompts untouched", () => {
   assert.equal(parseClaudeCommand("请用 Codex 修复这个问题"), null);
   assert.equal(parseClaudeCommand("/claudette run -- no"), null);
+  assert.equal(parseClaudeCommand("claudette run -- no"), null);
+  assert.equal(parseClaudeCommand("claude is expensive"), null);
+  assert.equal(extractClaudeCommandPrompt("claude is expensive"), null);
 });
 
-test("parses a raw task after the command terminator", () => {
+test("parses App slash commands and CLI-safe commands", () => {
   assert.deepEqual(parseClaudeCommand("/claude run -- 修复登录问题，并保留 --flag"), {
     kind: "run",
     prompt: "修复登录问题，并保留 --flag",
   });
+  assert.deepEqual(parseClaudeCommand("claude run -- 修复登录问题，并保留 --flag"), {
+    kind: "run",
+    prompt: "修复登录问题，并保留 --flag",
+  });
+  assert.deepEqual(parseClaudeCommand("claude status"), { kind: "status" });
 });
 
 test("parses native permission modes and runtime approval commands", () => {
@@ -91,6 +99,10 @@ test("extracts explicit Claude commands from Codex attachment envelopes", () => 
     kind: "image-run",
     prompt: "对比全部图片",
   });
+
+  const cliSafeCommand = attachmentPrompt("claude image add");
+  assert.equal(extractClaudeCommandPrompt(cliSafeCommand), "claude image add");
+  assert.deepEqual(parseClaudeCommand(cliSafeCommand), { kind: "image-add", force: false });
 });
 
 test("never promotes Claude text outside the explicit attachment request", () => {
@@ -119,6 +131,7 @@ test("never promotes Claude text outside the explicit attachment request", () =>
 
 test("rejects missing prompts and unterminated quotes", () => {
   assert.throws(() => parseClaudeCommand("/claude run"), CommandError);
+  assert.throws(() => parseClaudeCommand("claude run"), /用法：claude run/);
   assert.throws(() => parseClaudeCommand('/claude plugin add "C:\\broken'), CommandError);
 });
 

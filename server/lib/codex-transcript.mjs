@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { extractClaudeCommandPrompt } from "./command-parser.mjs";
 import { InputError } from "./validation.mjs";
 
 const DEFAULT_MAX_CHARACTERS = 180_000;
@@ -41,7 +42,7 @@ function visibleMessage(record, currentPrompt) {
   const text = visibleText(payload.content);
   if (!text) return null;
   if (payload.role === "user") {
-    if (text === currentPrompt || /^\s*\/claude(?:\s|$)/i.test(text)) return null;
+    if (text === currentPrompt || extractClaudeCommandPrompt(text) !== null) return null;
   }
   return {
     role: payload.role,

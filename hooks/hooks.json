@@ -1,5 +1,5 @@
 {
-  "description": "Deterministic /claude commands and private clipboard-image cleanup.",
+  "description": "Deterministic claude commands, App /claude aliases, and private clipboard-image cleanup.",
   "hooks": {
     "UserPromptSubmit": [
       {

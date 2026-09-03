@@ -14,10 +14,10 @@ Codex Claude Code Bridge runs locally under the current operating-system user. I
 
 There are two distinct execution paths:
 
-- Deterministic `/claude` hook commands use the local Claude Code CLI and its official `--permission-prompt-tool` MCP interface. Their permissions follow Claude's native modes and runtime permission flow.
+- Deterministic `claude` hook commands, plus the Codex App-only `/claude` alias, use the local Claude Code CLI and its official `--permission-prompt-tool` MCP interface. Their permissions follow Claude's native modes and runtime permission flow.
 - The optional model-directed Codex MCP fallback retains its own temporary directory capability and conservative tool list. It does not silently inherit direct-command bypass behavior.
 
-`/claude access allow <directory>` confirms the launch root, binds resumable Claude sessions to that root, and prevents accidental execution in a different Codex project. It does not stop Bash, plugins, MCP servers, or other tools from reaching paths that the current user can access when Claude's own permission flow allows them.
+`claude access allow <directory>` confirms the launch root, binds resumable Claude sessions to that root, and prevents accidental execution in a different Codex project. It does not stop Bash, plugins, MCP servers, or other tools from reaching paths that the current user can access when Claude's own permission flow allows them.
 
 ## Native permission modes
 
@@ -30,7 +30,7 @@ The deterministic path supports all current Claude modes:
 - `dont-ask` maps to `dontAsk` and denies unresolved prompts.
 - `bypass` maps to `bypassPermissions` with Claude's required explicit dangerous-mode acknowledgement.
 
-The bridge does not add an entire-task approval before Claude starts. A detached worker keeps the same Claude process alive while a specific tool request waits in the permission-prompt MCP server. `/claude allow` or `/claude deny` resolves that request, and execution resumes from the same tool call.
+The bridge does not add an entire-task approval before Claude starts. A detached worker keeps the same Claude process alive while a specific tool request waits in the permission-prompt MCP server. `claude allow` or `claude deny` resolves that request, and execution resumes from the same tool call.
 
 Claude evaluates hooks, managed settings, deny rules, ask rules, its permission mode, allow rules, and residual safeguards. The bridge does not circumvent organization policy or Claude errors.
 
@@ -62,11 +62,11 @@ Claude results are stored as private UTF-8 Markdown files until consumed or the 
 
 `once` approves only the current callback. `session`, `project`, and `user` return matching permission-update suggestions supplied by Claude when available. These suggestions may update in-memory session rules or Claude settings files. Review the displayed tool and intended scope before choosing a persistent option.
 
-`/claude answer` passes an answer object to Claude's `AskUserQuestion` call. Question text and answers are treated as user data and may be sent to the model.
+`claude answer` passes an answer object to Claude's `AskUserQuestion` call. Question text and answers are treated as user data and may be sent to the model.
 
 ## Clipboard images
 
-The bridge reads the Windows clipboard only after an explicit `/claude image add`. It copies supported PNG, JPEG, GIF, and WebP data into the plugin data directory, validates the captured bytes, and preserves queue order. It does not continuously monitor the clipboard.
+The bridge reads the Windows clipboard only after an explicit `claude image add`. It copies supported PNG, JPEG, GIF, and WebP data into the plugin data directory, validates the captured bytes, and preserves queue order. It does not continuously monitor the clipboard.
 
 Queued images remain local until a Claude task is run, at which point Claude Code reads the private image paths. The model and any enabled external tools may receive information extracted from the images. Clear the queue before switching to unrelated sensitive work.
 
@@ -74,7 +74,7 @@ Queued images remain local until a Claude task is run, at which point Claude Cod
 
 When enabled, the bridge reads the current Codex transcript path supplied by the hook and extracts visible user messages and final assistant responses. It does not intentionally include hidden reasoning or raw tool logs, but visible content can still contain secrets, proprietary material, malicious instructions, or incorrect statements.
 
-Use `/claude config set conversation-context off` before a task when the current Codex conversation should not be disclosed to Claude.
+Use `claude config set conversation-context off` before a task when the current Codex conversation should not be disclosed to Claude.
 
 ## Claude customizations
 

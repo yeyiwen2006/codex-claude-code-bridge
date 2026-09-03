@@ -17,7 +17,7 @@ import {
 } from "./lib/validation.mjs";
 
 const SERVER_NAME = "codex-claude-code-bridge";
-const SERVER_VERSION = "0.3.3";
+const SERVER_VERSION = "0.3.4";
 const FALLBACK_PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
@@ -170,7 +170,7 @@ export const TOOLS = Object.freeze([
   {
     name: "claude_code_run",
     title: "Run Claude Code with Changes",
-    description: "Model-directed fallback for running local Claude Code with project edits. Unlike deterministic /claude hook commands, this MCP fallback exposes file tools only, denies shell and web tools, and does not support bypass or arbitrary CLI flags.",
+    description: "Model-directed fallback for running local Claude Code with project edits. Unlike deterministic claude hook commands, this MCP fallback exposes file tools only, denies shell and web tools, and does not support bypass or arbitrary CLI flags.",
     inputSchema: {
       type: "object",
       properties: {
@@ -455,7 +455,7 @@ export async function handleMessage(message) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "Prefer deterministic /claude commands when the user asks for them. For model-directed calls, use claude_code_plan for read-only work and claude_code_run only when the user permits changes. Shell and web tools are unavailable; verify file changes afterward.",
+      instructions: "Prefer deterministic claude commands when the user asks for them. The Codex App also accepts the /claude alias, but Codex CLI requires the form without a slash. For model-directed calls, use claude_code_plan for read-only work and claude_code_run only when the user permits changes. Shell and web tools are unavailable; verify file changes afterward.",
     });
   }
 

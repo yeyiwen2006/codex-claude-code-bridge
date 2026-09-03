@@ -118,7 +118,7 @@ for (const mismatch of [
     name: "allow for AskUserQuestion",
     toolName: "AskUserQuestion",
     command: { kind: "allow", approvalId, scope: "once" },
-    message: /需要使用 \/claude answer/,
+    message: /需要使用 claude answer/,
   },
 ]) {
   test(`rejects ${mismatch.name}`, async () => {

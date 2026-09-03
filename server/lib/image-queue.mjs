@@ -168,7 +168,7 @@ export async function addClipboardImages(state, dataRoot, sessionId, options = {
       && state.lastClipboardSequence !== null
       && String(state.lastClipboardSequence) === String(capture.clipboardSequence)
     ) {
-      throw new InputError("剪贴板内容与上次 image add 相同；如需重复加入，请使用 /claude image add --force。");
+      throw new InputError("剪贴板内容与上次 image add 相同；如需重复加入，请使用 claude image add --force。");
     }
     const images = await validateCapturedImages(capture, destination);
     const combined = [...state.images, ...images];

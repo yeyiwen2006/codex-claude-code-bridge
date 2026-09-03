@@ -48,6 +48,8 @@ test("extracts only visible user and assistant conversation", async () => {
     message("assistant", "已经修改认证模块。", "commentary"),
     { type: "response_item", payload: { type: "custom_tool_call_output", output: "secret tool output" } },
     message("assistant", "还需要补充测试。", "final_answer"),
+    message("user", "claude is expensive"),
+    message("user", "claude status"),
     message("user", "/claude run -- 继续"),
   ]);
 
@@ -55,12 +57,13 @@ test("extracts only visible user and assistant conversation", async () => {
     currentPrompt: "/claude run -- 继续",
   });
   assert.equal(result.available, true);
-  assert.equal(result.messageCount, 3);
+  assert.equal(result.messageCount, 4);
   assert.equal(result.malformedLines, 1);
   assert.match(result.text, /\[用户\]\n实现登录功能/);
   assert.match(result.text, /\[Codex 助手\]\n已经修改认证模块/);
   assert.match(result.text, /还需要补充测试/);
-  assert.doesNotMatch(result.text, /developer|reasoning|tool output|\/claude run/);
+  assert.match(result.text, /claude is expensive/);
+  assert.doesNotMatch(result.text, /developer|reasoning|tool output|claude status|\/claude run/);
 });
 
 test("keeps the current task first so Claude skill commands remain invocable", () => {

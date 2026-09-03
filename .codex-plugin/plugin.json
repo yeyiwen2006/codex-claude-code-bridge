@@ -1,6 +1,6 @@
 {
   "name": "codex-claude-code-bridge",
-  "version": "0.3.3+codex.20260903031638",
+  "version": "0.3.4+codex.20260903070927",
   "description": "Run Claude Code from deterministic Codex commands with native runtime permissions, visible conversation inheritance, and multi-image clipboard handoff.",
   "author": {
     "name": "Codex Claude Code Bridge contributors"
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "Codex Claude Code Bridge",
     "shortDescription": "Claude Code commands with native permissions and image handoff.",
-    "longDescription": "A local bridge that intercepts explicit /claude commands before the Codex model, runs Claude Code with its official permission-prompt MCP interface and all native permission modes, inherits visible Codex conversation, queues multiple Windows clipboard images without manual saving, and keeps a guarded MCP/Skill fallback for model-directed use.",
+    "longDescription": "A local bridge that intercepts explicit claude commands (plus /claude aliases in the Codex App) before the Codex model, runs Claude Code with its official permission-prompt MCP interface and all native permission modes, inherits visible Codex conversation, queues multiple Windows clipboard images without manual saving, and keeps a guarded MCP/Skill fallback for model-directed use.",
     "developerName": "Codex Claude Code Bridge contributors",
     "category": "DeveloperTools",
     "capabilities": [
@@ -30,9 +30,9 @@
       "Claude plugins and Skills"
     ],
     "defaultPrompt": [
-      "/claude help",
-      "/claude access allow .",
-      "/claude status"
+      "claude help",
+      "claude access allow .",
+      "claude status"
     ]
   }
 }
