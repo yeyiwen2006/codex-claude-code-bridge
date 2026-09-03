@@ -290,4 +290,4 @@ npm run check
 
 ## 许可证
 
-MIT，见 [LICENSE](./LICENSE)。
+本项目采用 [MIT License](./LICENSE)，版权所有 © 2026 Yiwen Ye（GitHub：[@yeyiwen2006](https://github.com/yeyiwen2006)）。

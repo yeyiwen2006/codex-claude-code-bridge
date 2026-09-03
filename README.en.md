@@ -236,4 +236,4 @@ This local project is not a generic OpenAI cloud plugin: it depends on local std
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+This project is licensed under the [MIT License](./LICENSE). Copyright © 2026 Yiwen Ye (GitHub: [@yeyiwen2006](https://github.com/yeyiwen2006)).
