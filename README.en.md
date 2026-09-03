@@ -32,16 +32,14 @@ The same background Claude process and tool call continue from the paused point.
 
 ## Codex App
 
-1. Install and enable the plugin, then fully quit the Codex App.
-2. Open PowerShell and run `codex`.
-3. At `Hooks need review`, choose `Review hooks`. Verify the source is `codex-claude-code-bridge@personal` and the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
-4. If CLI is already open, use `/hooks` for the same review. Do not continue without trusting the hook.
-5. Exit CLI, reopen the App, and create a new task in the target project.
-6. Send `/claude status`. A hook-produced Claude status means interception is active.
+1. Install and enable the plugin.
+2. Open **Settings → Hooks** and review the plugin's `UserPromptSubmit` and `SessionEnd` hooks. Verify that the source is `codex-claude-code-bridge@personal` and that the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
+3. Fully quit and reopen the Codex App, then create a new task in the target project.
+4. Send `/claude status`. A hook-produced Claude status means interception is active.
 
 The App's plugin picker or `@` mention displays the plugin name above the composer. That is useful for the natural-language MCP/Skill fallback. Deterministic `/claude ...` messages do not need the plugin label on every request and do not require selecting the plugin first.
 
-The App does not currently expose `/hooks`. Initial trust, and re-trust after an update is marked `new or changed`, must be completed once in Codex CLI. Reopen the App and start a new task afterward.
+For both initial installation and updates marked `new or changed`, you can review and trust the hooks in **Settings → Hooks** in the Codex App. You can also complete the same review with `/hooks` in Codex CLI.
 
 ## Codex CLI
 
@@ -122,6 +120,8 @@ Conversation text can still contain secrets, proprietary material, or prompt inj
 
 The Codex hook does not expose pixels from unsubmitted attachments. The bridge captures the original bitmap or image files from the Windows clipboard without requiring a manual save.
 
+The Codex App adds a file list and a `My request` envelope to submissions with attachments. The bridge recognizes only the explicit user request inside that envelope. `/claude` text in attachment names, document contents, or any other envelope section never triggers a command.
+
 For each copied or pasted bitmap, send `/claude image add`; a clipboard containing multiple image files adds them together. Then:
 
 ```text
@@ -189,7 +189,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 
 - Claude Code can occasionally return a successful envelope with an empty result, especially when user or project customizations are loaded. The bridge preserves exit code, protocol warning, stop reason, and related diagnostic metadata. First retry with `/claude config set customizations plugin-only`, then inspect Claude hooks, plugins, and settings.
 - The inherited Codex conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `/claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
-- Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Use interactive `codex` for first-time hook trust and troubleshooting.
+- Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
 - `/claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, use `claude doctor` to inspect endpoint and login status. The bridge respects Claude's environment and does not override a custom endpoint.
 
@@ -212,7 +212,7 @@ node .\scripts\register-personal-marketplace.mjs
 codex plugin add codex-claude-code-bridge@personal
 ```
 
-Start a new Codex task after every install or update. Re-review the hook in CLI whenever Codex marks it `new or changed`.
+Start a new Codex task after every install or update. Whenever Codex marks a hook `new or changed`, re-review it in **Settings → Hooks** in the App or with `/hooks` in Codex CLI.
 
 ## Security and data
 

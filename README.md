@@ -39,16 +39,13 @@ Codex Claude Code Bridge 是一个非官方、开源的本地 Codex 插件。它
 ### 在 Codex App 中
 
 1. 安装并启用插件。
-2. 完全退出 Codex App。
-3. 打开 PowerShell，运行 `codex`。
-4. 如果显示 `Hooks need review`，选择 `Review hooks`；确认来源为 `codex-claude-code-bridge@personal`，命令只启动插件内的 `scripts/command-hook.mjs`，然后信任。
-5. 如果 CLI 已进入聊天界面，输入 `/hooks` 完成同样的审查。不要选择“不信任并继续”。
-6. 退出 CLI，重新打开 Codex App，在目标项目中新建一个任务。
-7. 直接发送 `/claude status`。如果返回 Claude Code 状态，说明 Hook 已生效。
+2. 打开“设置”→“钩子”，审查插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。确认来源为 `codex-claude-code-bridge@personal`，命令只启动插件内的 `scripts/command-hook.mjs`，然后信任。
+3. 完全退出并重新打开 Codex App，在目标项目中新建一个任务。
+4. 直接发送 `/claude status`。如果返回 Claude Code 状态，说明 Hook 已生效。
 
 Codex App 输入框可以选择 Codex Claude Code Bridge 插件，选择后会在输入框上方显示插件名。那主要用于自然语言触发 MCP/Skill 兼容路径。确定性 `/claude ...` 命令不要求每条消息都带插件名，也不需要先选择插件。
 
-当前 Codex App 没有 `/hooks` 页面，因此首次信任以及更新后 Hook 被标记为 `new or changed` 时，需要在 Codex CLI 中审查一次，再重新打开 App 并新建任务。
+首次安装以及更新后 Hook 被标记为 `new or changed` 时，都可以在 Codex App 的“设置”→“钩子”中重新审查并信任。也可以在 Codex CLI 中使用 `/hooks` 完成同样的操作。
 
 ### 在 Codex CLI 中
 
@@ -150,6 +147,8 @@ Codex App 输入框可以选择 Codex Claude Code Bridge 插件，选择后会�
 
 Codex Hook 目前不提供“本次尚未提交附件”的像素内容，所以插件从 Windows 剪贴板直接捕获刚粘贴的原始位图或图片文件，不需要用户手动另存。
 
+Codex App 会在带附件的提交中加入附件清单和 `My request` 包装。桥接器只识别该包装内明确的用户请求；附件文件名、文档内容或其他区域即使出现 `/claude` 文字也不会触发命令。
+
 单张图片：
 
 1. 在任意应用复制图片或在 Codex 输入框粘贴图片。
@@ -240,7 +239,7 @@ Codex Hook 目前不提供“本次尚未提交附件”的像素内容，所以
 
 - Claude Code 偶尔会以成功状态结束但返回空正文，尤其是加载用户或项目自定义项时。插件会保留退出码、协议警告、停止原因等诊断元数据；可先执行 `/claude config set customizations plugin-only` 复测，再检查 Claude Hooks、插件和设置。
 - 继承的 Codex 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `/claude config set conversation-context off`，再用独立、明确的提示词重试。
-- Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。首次安装、信任 Hook 和排障应使用交互式 `codex`。
+- Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。Hook 信任可在 Codex App 的“设置”→“钩子”或交互式 Codex CLI 的 `/hooks` 中完成；排障时不要使用非交互 `codex exec`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
 - `/claude status` 会显示当前进程是否设置了自定义 `ANTHROPIC_BASE_URL`，但不会泄露 URL。若认证显示正常而调用长期停在 `running`，可运行 `claude doctor` 检查端点与登录状态；桥接器会尊重 Claude 环境，不会擅自改写自定义端点。
 
@@ -265,7 +264,7 @@ node .\scripts\register-personal-marketplace.mjs
 codex plugin add codex-claude-code-bridge@personal
 ```
 
-安装或更新后都要新建 Codex 任务；Hook 定义变化时要在 CLI 中重新审查并信任。
+安装或更新后都要新建 Codex 任务；Hook 定义变化时要在 Codex App 的“设置”→“钩子”或 Codex CLI 的 `/hooks` 中重新审查并信任。
 
 ## 安全与数据
 
