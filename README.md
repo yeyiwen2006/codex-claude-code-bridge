@@ -12,7 +12,7 @@ Codex Claude Code Bridge 是一个非官方、开源的本地 Codex 插件。它
 
 ## 支持范围
 
-完整插件只支持 Codex App 与 Codex CLI。它依赖 `.codex-plugin` 清单、Codex 的 `UserPromptSubmit`/`SessionEnd` Hook、任务级 `PLUGIN_DATA`、`transcript_path` 和 Codex Skill，因此不能作为其他 Agent 的等价插件直接安装。
+完整插件只支持 Codex App 与 Codex CLI。它依赖 `.codex-plugin` 清单、Codex 的 `UserPromptSubmit`/`Interrupt`/`SessionEnd` Hook、任务级 `PLUGIN_DATA`、`transcript_path` 和 Codex Skill，因此不能作为其他 Agent 的等价插件直接安装。
 
 其他支持本地 stdio MCP 的 Agent 可以自行配置 `.mcp.json` 中的 MCP 服务器，并复用 `claude_code_health`、`claude_code_authorize_directory`、`claude_code_plan` 和 `claude_code_run` 四个保守工具；这种方式不包含确定性 `claude` 命令、Codex 对话继承、任务清理、剪贴板图片队列或原生运行时审批，属于有限的 MCP 复用，不是完整产品支持。
 
@@ -34,12 +34,14 @@ claude allow a1b2c3d4 once
 
 批准后是同一个 Claude 进程、同一个工具调用、同一项任务从暂停处继续，不会重新发送任务。
 
+`plan`、`run`、`image run` 与 `skill run` 正常会一直等待到 Claude Code 得到最终结果，再由当前这次 Hook 一次返回；不再在固定 30 秒后要求手动轮询。detached worker 仍然保留，用于真实审批、Codex 中断、Hook 超时和 App 意外退出后的安全收尾。
+
 ## Codex App 与 Codex CLI
 
 ### 在 Codex App 中
 
 1. 安装并启用插件。
-2. 打开“设置”→“钩子”，审查插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。确认来源为 `codex-claude-code-bridge@personal`，命令只启动插件内的 `scripts/command-hook.mjs`，然后信任。
+2. 打开“设置”→“钩子”，审查插件的 `UserPromptSubmit`、`Interrupt` 和 `SessionEnd` Hook。确认来源为 `codex-claude-code-bridge@personal`，命令只启动插件内的 `scripts/command-hook.mjs`，然后信任。
 3. 完全退出并重新打开 Codex App，在目标项目中新建一个任务。
 4. 直接发送 `/claude status` 或 `claude status`。如果返回 Claude Code 状态，说明 Hook 已生效。
 
@@ -51,7 +53,7 @@ Codex App 输入框可以选择 Codex Claude Code Bridge 插件，选择后会�
 
 1. 运行 `codex`。
 2. 用 `/plugins` 确认 `codex-claude-code-bridge` 已安装并启用。
-3. 用 `/hooks` 审查并信任插件的 `UserPromptSubmit` 和 `SessionEnd` Hook。
+3. 用 `/hooks` 审查并信任插件的 `UserPromptSubmit`、`Interrupt` 和 `SessionEnd` Hook。
 4. 新建会话或重新启动 CLI。
 5. 发送 `claude status`，然后执行 `claude access allow .`。不要添加 `/`，否则 CLI 会把它当作未知内置斜杠命令，并在 Hook 收到消息前拒绝。
 
@@ -124,13 +126,17 @@ claude deny a1b2c3d4 -- 不要删除文件，请改为归档
 claude answer a1b2c3d4 -- {"使用哪种数据库？":"SQLite"}
 ```
 
-后台任务运行超过当前 Hook 等待窗口时，命令会先返回任务 ID。之后使用：
+正常任务会在 `timeout-seconds` 允许的范围内同步等待最终结果。只有下面几种情况会在终态前返回：Claude 正在等待真实工具审批或 `AskUserQuestion`；Codex/App 中断了当前回合；或者 worker 在 Claude 超时之后仍未能在 Hook 的收尾保护时间内写入终态。审批时提交 `allow`、`deny` 或 `answer` 后，插件继续等待同一个 Claude 进程的最终结果或下一次审批。
+
+Codex 的停止按钮会触发 `Interrupt` Hook 并取消 worker。以下命令主要用于审批之间、Hook/App 异常退出后的恢复与显式取消，不再是普通调用的必经步骤：
 
 ```text
 claude status
 claude result
 claude cancel 1a2b3c4d
 ```
+
+同一个 Codex `turn_id` 即使被重复加载的 Hook 实例并发收到，也只执行一次；其余实例静默退出，避免一条提交产生两个相同结果。
 
 ## 当前 Codex 对话继承
 
@@ -237,7 +243,7 @@ claude result
 
 ## 已知边界与排查
 
-- Claude Code 偶尔会以成功状态结束但返回空正文，尤其是加载用户或项目自定义项时。插件会保留退出码、协议警告、停止原因等诊断元数据；可先执行 `claude config set customizations plugin-only` 复测，再检查 Claude Hooks、插件和设置。
+- Claude Code 偶尔会以成功状态结束但返回空的最终 `result`，尤其是加载用户或项目自定义项时。确定性命令使用 `stream-json`，会先恢复主会话最后一条非空 assistant 文本；若最终 envelope 和 assistant 流都为空，插件会显示回合数、费用、已加载插件和 stream 事件计数，并且不会自动重试。需要做一次低成本隔离复测时，先执行 `claude config set customizations plugin-only` 或 `safe`，再设置较小的 `max-budget-usd`，然后检查 Claude Hooks、插件和设置。
 - 继承的 Codex 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `claude config set conversation-context off`，再用独立、明确的提示词重试。
 - Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。Hook 信任可在 Codex App 的“设置”→“钩子”或交互式 Codex CLI 的 `/hooks` 中完成；排障时不要使用非交互 `codex exec`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
@@ -264,7 +270,7 @@ node .\scripts\register-personal-marketplace.mjs
 codex plugin add codex-claude-code-bridge@personal
 ```
 
-安装或更新后都要新建 Codex 任务；Hook 定义变化时要在 Codex App 的“设置”→“钩子”或 Codex CLI 的 `/hooks` 中重新审查并信任。
+安装或更新后都要新建 Codex 任务；Hook 定义变化时要在 Codex App 的“设置”→“钩子”或 Codex CLI 的 `/hooks` 中重新审查并信任。本版本新增 `Interrupt` 并延长 `UserPromptSubmit` 的同步等待上限，因此更新后必须重新审查。
 
 ## 安全与数据
 
@@ -282,7 +288,7 @@ npm install
 npm run check
 ```
 
-测试覆盖命令解析、当前对话继承、多图队列、原生权限模式映射、bypass 无桥接器工具黑名单、Claude 结果归一化、权限提示 MCP、主 MCP 协议与 UTF-8 静态检查。
+测试覆盖 App/CLI 命令解析、单次提交去重、同步终态、长任务、超时、中断取消、工具审批、`AskUserQuestion`、空结果恢复、customizations 隔离、当前对话继承、多图队列、原生权限模式映射、bypass 无桥接器工具黑名单、权限提示 MCP、主 MCP 协议与 UTF-8 静态检查。
 
 项目可以作为普通公开 GitHub 仓库发布。仓库不包含 Claude 登录凭据、用户图片、插件运行状态或项目数据。使用者仍需在自己的电脑安装 Claude Code、Node.js 与 Codex，并独立信任 Hook。
 

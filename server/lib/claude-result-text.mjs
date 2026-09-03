@@ -22,6 +22,12 @@ export function formatClaudeJobResult(result, request) {
     errors: result.errors ?? [],
     permission_denials: result.permission_denials ?? [],
     empty_result: emptyResult,
+    original_result_empty: result.original_result_empty ?? emptyResult,
+    result_recovered_from_stream: result.result_recovered_from_stream ?? false,
+    stream_assistant_messages: result.stream_assistant_messages ?? null,
+    stream_event_counts: result.stream_event_counts ?? null,
+    loaded_plugins: result.loaded_plugins ?? [],
+    plugin_errors: result.plugin_errors ?? [],
     permission_mode: request.input.permissionMode,
     customizations: request.input.customizationSources,
     codex_conversation_messages: request.conversation?.messageCount ?? 0,
@@ -30,8 +36,8 @@ export function formatClaudeJobResult(result, request) {
   const primary = emptyResult
     ? result.ok
       ? [
-          "Claude Code 已成功结束，但结果正文为空。Bridge 没有丢弃非空 result。",
-          "这通常来自 Claude Code 自身的 Hook、插件、设置或输出协议；可先用 customizations=plugin-only 复测，再查看下方诊断元数据。",
+          "Claude Code 已成功结束，但结果正文为空：最终 envelope 与主会话 assistant 流都没有可恢复文本。Bridge 不会自动重试，因此不会为同一空结果再次产生模型费用。",
+          "请先查看下方的回合数、费用、已加载插件与 stream 事件计数。若需做一次隔离复测，可先设置 customizations=plugin-only 或 safe，并设置较小的 max-budget-usd。",
         ].join("\n")
       : "Claude Code 未成功完成，也没有返回结果正文；请查看下方诊断元数据。"
     : result.result;

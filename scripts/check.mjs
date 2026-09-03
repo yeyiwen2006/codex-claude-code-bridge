@@ -42,6 +42,7 @@ assert.equal(server.default_tools_approval_mode, "prompt");
 assert.equal(server.tools.claude_code_run.approval_mode, "prompt");
 assert.equal(server.tools.claude_code_authorize_directory.approval_mode, "prompt");
 assert.ok(Array.isArray(hooks.hooks?.UserPromptSubmit));
+assert.ok(Array.isArray(hooks.hooks?.Interrupt));
 assert.ok(Array.isArray(hooks.hooks?.SessionEnd));
 assert.match(
   hooks.hooks.UserPromptSubmit[0].hooks[0].commandWindows,
@@ -58,6 +59,7 @@ const sourceFiles = [
   "server/lib/claude-job-manager.mjs",
   "server/lib/claude-job-worker.mjs",
   "server/lib/claude-result-text.mjs",
+  "server/lib/hook-once.mjs",
   "server/lib/permission-prompt-server.mjs",
   "server/lib/image-queue.mjs",
   "server/lib/state-store.mjs",

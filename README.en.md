@@ -10,7 +10,7 @@ The project is not affiliated with or endorsed by OpenAI or Anthropic. It does n
 
 ## Support scope
 
-The complete plugin supports Codex App and Codex CLI only. It depends on a `.codex-plugin` manifest, Codex `UserPromptSubmit`/`SessionEnd` hooks, task-scoped `PLUGIN_DATA`, `transcript_path`, and a Codex Skill, so another agent cannot install it as a feature-equivalent plugin.
+The complete plugin supports Codex App and Codex CLI only. It depends on a `.codex-plugin` manifest, Codex `UserPromptSubmit`/`Interrupt`/`SessionEnd` hooks, task-scoped `PLUGIN_DATA`, `transcript_path`, and a Codex Skill, so another agent cannot install it as a feature-equivalent plugin.
 
 Other agents with local stdio MCP support may manually configure the server in `.mcp.json` and reuse the four conservative tools: `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. That limited MCP reuse does not include deterministic `claude` commands, Codex conversation inheritance, task cleanup, the clipboard image queue, or native runtime approvals and is not a supported equivalent of the complete product.
 
@@ -30,10 +30,12 @@ claude allow a1b2c3d4 once
 
 The same background Claude process and tool call continue from the paused point. The task is not restarted.
 
+`plan`, `run`, `image run`, and `skill run` normally wait until Claude Code has a final result and return it once from the current hook. They no longer fall back to manual polling after a fixed 30-second window. The detached worker remains in place for real approvals, Codex interruption, hook timeouts, and safe cleanup after an unexpected App exit.
+
 ## Codex App
 
 1. Install and enable the plugin.
-2. Open **Settings → Hooks** and review the plugin's `UserPromptSubmit` and `SessionEnd` hooks. Verify that the source is `codex-claude-code-bridge@personal` and that the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
+2. Open **Settings → Hooks** and review the plugin's `UserPromptSubmit`, `Interrupt`, and `SessionEnd` hooks. Verify that the source is `codex-claude-code-bridge@personal` and that the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
 3. Fully quit and reopen the Codex App, then create a new task in the target project.
 4. Send `/claude status` or `claude status`. A hook-produced Claude status means interception is active.
 
@@ -45,7 +47,7 @@ For both initial installation and updates marked `new or changed`, you can revie
 
 1. Run `codex`.
 2. Use `/plugins` to confirm the plugin is installed and enabled.
-3. Use `/hooks` to review and trust its `UserPromptSubmit` and `SessionEnd` hooks.
+3. Use `/hooks` to review and trust its `UserPromptSubmit`, `Interrupt`, and `SessionEnd` hooks.
 4. Start a fresh CLI session.
 5. Send `claude status`, then `claude access allow .`. Do not add `/`: the CLI treats it as an unknown built-in slash command and rejects it before the hook receives the prompt.
 
@@ -97,13 +99,17 @@ claude answer <id> -- {"Which database?":"SQLite"}
 
 `session`, `project`, and `user` echo matching native permission suggestions supplied by Claude when available. `project` prefers local/project settings destinations. `AskUserQuestion` requests display question JSON and use `claude answer`.
 
-For a long-running background task:
+Normal tasks wait synchronously for the final result within `timeout-seconds`. A command returns before a terminal state only when Claude is waiting for a real tool approval or `AskUserQuestion`, the Codex/App turn is interrupted, or the worker still cannot write a terminal state during the hook's finalization grace period after Claude's timeout. After `allow`, `deny`, or `answer`, the bridge waits on the same Claude process until its final result or next approval.
+
+The Codex stop action invokes the `Interrupt` hook and cancels the worker. These commands are primarily for recovery between approvals, after an unexpected hook/App exit, or for an explicit cancellation; they are no longer required for normal calls:
 
 ```text
 claude status
 claude result
 claude cancel <job-id>
 ```
+
+If duplicate hook instances receive the same Codex `turn_id` concurrently, the command executes once and the other instances exit silently, so one submission does not create duplicate results.
 
 ## Codex conversation inheritance
 
@@ -187,7 +193,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 
 ## Known boundaries and troubleshooting
 
-- Claude Code can occasionally return a successful envelope with an empty result, especially when user or project customizations are loaded. The bridge preserves exit code, protocol warning, stop reason, and related diagnostic metadata. First retry with `claude config set customizations plugin-only`, then inspect Claude hooks, plugins, and settings.
+- Claude Code can occasionally return a successful envelope with an empty final `result`, especially when user or project customizations are loaded. Deterministic commands use `stream-json` and first recover the last non-empty main-session assistant text. If both the final envelope and assistant stream are empty, the bridge reports turn count, cost, loaded plugins, and stream event counts, and it does not retry automatically. For one low-cost isolation run, set `customizations` to `plugin-only` or `safe`, set a small `max-budget-usd`, and then inspect Claude hooks, plugins, and settings.
 - The inherited Codex conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
@@ -212,7 +218,7 @@ node .\scripts\register-personal-marketplace.mjs
 codex plugin add codex-claude-code-bridge@personal
 ```
 
-Start a new Codex task after every install or update. Whenever Codex marks a hook `new or changed`, re-review it in **Settings → Hooks** in the App or with `/hooks` in Codex CLI.
+Start a new Codex task after every install or update. Whenever Codex marks a hook `new or changed`, re-review it in **Settings → Hooks** in the App or with `/hooks` in Codex CLI. This release adds `Interrupt` and extends the `UserPromptSubmit` synchronous wait, so an updated installation must be reviewed again.
 
 ## Security and data
 
@@ -231,6 +237,8 @@ npm run check
 ```
 
 The project can be published as a normal public GitHub repository. It contains no user login credentials, clipboard images, runtime state, or project data. Each user must install Claude Code, Node.js, and Codex locally and trust the hook independently.
+
+The automated suite covers App/CLI command parsing, one-turn deduplication, synchronous completion, delayed jobs, timeout, interrupt cancellation, tool approvals, `AskUserQuestion`, empty-result recovery, customization isolation, conversation inheritance, image ordering, permission modes, MCP, and UTF-8 validation.
 
 This local project is not a generic OpenAI cloud plugin: it depends on local stdio MCP, Codex hooks, the Windows clipboard, and local processes.
 

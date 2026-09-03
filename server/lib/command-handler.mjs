@@ -19,10 +19,15 @@ import {
 import {
   cancelClaudeJob,
   describeClaudeJob,
+  interruptClaudeJob,
   readClaudeJobResult,
   resolveClaudeApproval,
   startClaudeJob,
 } from "./claude-job-manager.mjs";
+import {
+  cleanupHookReceipts,
+  runHookCommandOnce,
+} from "./hook-once.mjs";
 import {
   CommandError,
   parseClaudeCommand,
@@ -107,6 +112,11 @@ Codex CLI 会把未知 / 命令拦在 Hook 之前，因此 CLI 请勿添加斜�
   claude cancel [任务 ID]
   claude result
 
+等待行为
+  plan/run/image/skill 正常会在本次 Hook 中等到 Claude 最终结果并一次返回。
+  只有真实工具审批或 AskUserQuestion 会提前返回；allow/answer 后继续等待同一进程。
+  Codex 的停止/中断会取消 worker；result 仅用于 Hook 超时、App 重启等恢复场景。
+
 多图
   先粘贴图片，再发送 claude image add
   每张位图重复一次；一次复制多个图片文件时会一次全部加入
@@ -143,7 +153,8 @@ Claude 插件与 Skills
 权限说明
   manual 只在 Claude 真实请求权限时暂停；批准后同一进程从原处继续。
   bypass 完整使用 Claude 原生 bypassPermissions：不会由桥接器限制工具、网络或目录。
-  Claude 自身的策略、ask/deny 规则、Hooks 与关键路径保护仍然生效。`;
+  Claude 自身的策略、ask/deny 规则、Hooks 与关键路径保护仍然生效。
+  空结果会先尝试恢复主 assistant 流的最后文本；Bridge 不会自动重试并重复计费。`;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -569,7 +580,7 @@ async function executeCommand(command, context) {
         `端点：${health.custom_endpoint ? "自定义 ANTHROPIC_BASE_URL" : "Claude 默认端点"}`,
         `目录：${authorization}`,
         `图片队列：${state.images.length} 张`,
-        `后台任务：${jobStatus}`,
+        `Claude 任务：${jobStatus}`,
         `Claude 会话：${state.claudeSessionId ?? "未持久化"}`,
         `当前 Codex 会话权限覆盖：${state.sessionPermission ?? "无（使用全局默认）"}`,
         "",
@@ -792,6 +803,14 @@ export async function handleHookEvent(input, options = {}) {
   if (input.hook_event_name === "SessionEnd") {
     if (typeof input.session_id === "string") {
       await cleanupSession(dataRoot, input.session_id).catch(() => {});
+      await cleanupHookReceipts(dataRoot, input.session_id).catch(() => {});
+    }
+    return null;
+  }
+  if (input.hook_event_name === "Interrupt") {
+    if (typeof input.session_id === "string") {
+      const interrupt = options.interruptClaudeJob ?? interruptClaudeJob;
+      await interrupt({ dataRoot, sessionId: input.session_id }).catch(() => {});
     }
     return null;
   }
@@ -823,18 +842,20 @@ export async function handleHookEvent(input, options = {}) {
     resolveClaudeApproval: options.resolveClaudeApproval ?? resolveClaudeApproval,
     cancelClaudeJob: options.cancelClaudeJob ?? cancelClaudeJob,
   };
-  try {
-    const reason = await executeCommand(command, {
-      dataRoot,
-      sessionId: input.session_id,
-      cwd: input.cwd,
-      transcriptPath: input.transcript_path,
-      submittedPrompt: input.prompt,
-      environment: options.environment ?? process.env,
-      dependencies,
-    });
-    return { decision: "block", reason };
-  } catch (error) {
-    return { decision: "block", reason: `Codex Claude Code Bridge 失败：${errorMessage(error)}` };
-  }
+  return runHookCommandOnce(dataRoot, input.session_id, input.turn_id, async () => {
+    try {
+      const reason = await executeCommand(command, {
+        dataRoot,
+        sessionId: input.session_id,
+        cwd: input.cwd,
+        transcriptPath: input.transcript_path,
+        submittedPrompt: input.prompt,
+        environment: options.environment ?? process.env,
+        dependencies,
+      });
+      return { decision: "block", reason };
+    } catch (error) {
+      return { decision: "block", reason: `Codex Claude Code Bridge 失败：${errorMessage(error)}` };
+    }
+  });
 }

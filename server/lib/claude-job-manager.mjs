@@ -12,6 +12,9 @@ import {
 
 const WORKER_PATH = fileURLToPath(new URL("./claude-job-worker.mjs", import.meta.url));
 const EVENT_WAIT_MS = 30_000;
+const FINALIZATION_GRACE_MS = 30_000;
+const MAX_SYNCHRONOUS_WAIT_MS = 3_630_000;
+const DEFAULT_JOB_TIMEOUT_SECONDS = 1_800;
 const POLL_MS = 150;
 
 function delay(milliseconds) {
@@ -86,6 +89,21 @@ export function approvalText(job) {
   ].filter((entry) => entry !== null).join("\n");
 }
 
+export function synchronousWaitMilliseconds(timeoutSeconds) {
+  const normalized = Number.isSafeInteger(timeoutSeconds) && timeoutSeconds > 0
+    ? timeoutSeconds
+    : DEFAULT_JOB_TIMEOUT_SECONDS;
+  return Math.min((normalized * 1_000) + FINALIZATION_GRACE_MS, MAX_SYNCHRONOUS_WAIT_MS);
+}
+
+function synchronousWaitExpiredText(job) {
+  return [
+    `Claude Code 任务 ${job.id} 尚未在同步等待保护窗口内写入终态。`,
+    "后台 worker 仍保留，以免 Hook 超时中断正在收尾的 Claude 进程。",
+    `可用 claude status 查看状态、claude result 读取稍后结果，或 claude cancel ${job.id} 取消。`,
+  ].join("\n");
+}
+
 async function consumeCompletedJob(dataRoot, sessionId, job) {
   let text = job.error ? `Claude Code 任务失败：${job.error}` : "Claude Code 已结束，但没有结果文本。";
   if (job.resultPath) {
@@ -114,7 +132,7 @@ export async function waitForJobEvent(dataRoot, sessionId, jobId, waitMs = EVENT
       return consumeCompletedJob(dataRoot, sessionId, job);
     }
     if (Date.now() >= deadline) {
-      return approvalText(job);
+      return synchronousWaitExpiredText(job);
     }
     await delay(POLL_MS);
   }
@@ -141,6 +159,7 @@ export async function startClaudeJob(request, context) {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         permissionMode: request.input.permissionMode,
+        timeoutSeconds: request.input.timeoutSeconds,
         workerPid: null,
         pendingApproval: null,
         decision: null,
@@ -160,7 +179,12 @@ export async function startClaudeJob(request, context) {
     await unlink(specPath).catch(() => {});
     throw error;
   }
-  return waitForJobEvent(context.dataRoot, context.sessionId, jobId);
+  return waitForJobEvent(
+    context.dataRoot,
+    context.sessionId,
+    jobId,
+    synchronousWaitMilliseconds(request.input.timeoutSeconds),
+  );
 }
 
 export async function describeClaudeJob(context) {
@@ -184,7 +208,7 @@ export async function readClaudeJobResult(context) {
 }
 
 export async function resolveClaudeApproval(command, context) {
-  const jobId = await mutateSession(context.dataRoot, context.sessionId, async (state) => {
+  const resumed = await mutateSession(context.dataRoot, context.sessionId, async (state) => {
     const job = state.activeJob;
     if (
       !job
@@ -210,9 +234,25 @@ export async function resolveClaudeApproval(command, context) {
       createdAt: Date.now(),
     };
     job.updatedAt = Date.now();
-    return job.id;
+    return { id: job.id, timeoutSeconds: job.timeoutSeconds };
   });
-  return waitForJobEvent(context.dataRoot, context.sessionId, jobId);
+  return waitForJobEvent(
+    context.dataRoot,
+    context.sessionId,
+    resumed.id,
+    synchronousWaitMilliseconds(resumed.timeoutSeconds),
+  );
+}
+
+export async function interruptClaudeJob(context) {
+  await mutateSession(context.dataRoot, context.sessionId, async (state) => {
+    const job = state.activeJob;
+    if (!job || !activeStatus(job)) {
+      return;
+    }
+    job.cancelRequested = true;
+    job.updatedAt = Date.now();
+  });
 }
 
 export async function cancelClaudeJob(command, context) {

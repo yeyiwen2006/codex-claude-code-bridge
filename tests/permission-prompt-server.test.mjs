@@ -114,3 +114,62 @@ test("parks one actual tool request and resumes it after an allow decision", asy
   assert.equal(finalState.activeJob.pendingApproval, null);
   child.stdin.end();
 });
+
+test("parks AskUserQuestion and resumes it with the submitted answers", async (context) => {
+  const child = spawn(process.execPath, [serverPath, dataRoot, sessionId, jobId], {
+    shell: false,
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  context.after(() => {
+    if (child.exitCode === null) child.kill();
+  });
+  const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+  const iterator = lines[Symbol.asyncIterator]();
+  const send = (payload) => child.stdin.write(`${JSON.stringify(payload)}\n`);
+
+  send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
+  await iterator.next();
+  const questions = [{ question: "Which database?", options: ["SQLite", "Postgres"] }];
+  send({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "request",
+      arguments: {
+        tool_name: "AskUserQuestion",
+        input: { questions },
+        tool_use_id: "tool-question-1",
+      },
+    },
+  });
+
+  let approvalId;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const state = await loadSessionState(dataRoot, sessionId);
+    approvalId = state.activeJob?.pendingApproval?.id;
+    if (approvalId) break;
+    await delay(20);
+  }
+  assert.match(approvalId, /^[0-9a-f]{8}$/);
+  await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+    const state = await loadSessionState(dataRoot, sessionId);
+    state.activeJob.decision = {
+      approvalId,
+      action: "answer",
+      answers: { "Which database?": "SQLite" },
+      createdAt: Date.now(),
+    };
+    await saveSessionState(dataRoot, sessionId, state);
+  });
+
+  const reply = JSON.parse((await iterator.next()).value);
+  const decision = JSON.parse(reply.result.content[0].text);
+  assert.equal(decision.behavior, "allow");
+  assert.deepEqual(decision.updatedInput, {
+    questions,
+    answers: { "Which database?": "SQLite" },
+  });
+  child.stdin.end();
+});

@@ -26,53 +26,104 @@ if (prompt === undefined) {
   prompt = Buffer.concat(chunks).toString("utf8");
 }
 
+const outputFormatIndex = argumentsList.indexOf("--output-format");
+const outputFormat = outputFormatIndex >= 0 ? argumentsList[outputFormatIndex + 1] : "text";
+
 if (prompt === "__FAIL__") {
   process.stderr.write("mock failure\n");
   process.exit(2);
 }
 
 if (prompt === "__HANG__") {
-  setInterval(() => {}, 1000);
-} else if (prompt === "__MALFORMED__") {
+  setInterval(() => {}, 1_000);
+  await new Promise(() => {});
+}
+
+const delayMatch = /^__DELAY_(\d+)__$/.exec(prompt);
+if (delayMatch) {
+  await new Promise((resolve) => setTimeout(resolve, Number(delayMatch[1])));
+}
+
+if (prompt === "__MALFORMED__") {
   process.stdout.write("plain text fallback");
-} else if (prompt === "__CLAUDE_ERROR__") {
-  process.stdout.write(JSON.stringify({
+  process.exit(0);
+}
+
+let envelope;
+let emittedAssistantText;
+if (prompt === "__CLAUDE_ERROR__") {
+  envelope = {
     type: "result",
     subtype: "error_max_budget_usd",
     is_error: false,
     errors: ["mock budget exhausted"],
     session_id: "11111111-2222-4333-8444-555555555555",
     permission_denials: [],
-  }));
+  };
 } else if (prompt === "__ENV__") {
-  process.stdout.write(JSON.stringify({
+  envelope = {
     type: "result",
     subtype: "success",
     is_error: false,
     result: process.env.GITHUB_TOKEN ? "secret-present" : "secret-absent",
     session_id: "11111111-2222-4333-8444-555555555555",
     permission_denials: [],
-  }));
+  };
 } else if (prompt === "__BIG__") {
   process.stdout.write("x".repeat(128 * 1024));
+  process.exit(0);
 } else {
   const resumeIndex = argumentsList.indexOf("--resume");
   const sessionId = resumeIndex >= 0
     ? argumentsList[resumeIndex + 1]
     : "11111111-2222-4333-8444-555555555555";
-  process.stdout.write(JSON.stringify({
+  const emptyEnvelope = prompt === "__EMPTY__" || prompt === "__EMPTY_WITH_ASSISTANT__";
+  const resultText = emptyEnvelope ? "" : `mock:${prompt}`;
+  emittedAssistantText = prompt === "__EMPTY__"
+    ? undefined
+    : prompt === "__EMPTY_WITH_ASSISTANT__"
+      ? "recovered assistant text"
+      : resultText;
+  envelope = {
     type: "result",
     subtype: "success",
     is_error: false,
-    result: `mock:${prompt}`,
+    result: resultText,
     session_id: sessionId,
     num_turns: 1,
     duration_ms: 12,
     duration_api_ms: 5,
     total_cost_usd: 0,
     stop_reason: "end_turn",
+    terminal_reason: "completed",
     usage: { input_tokens: 1, output_tokens: 1 },
     modelUsage: { mock: { inputTokens: 1, outputTokens: 1 } },
     permission_denials: [],
-  }));
+  };
+}
+
+if (outputFormat === "stream-json") {
+  const settingSourcesIndex = argumentsList.indexOf("--setting-sources");
+  const isolated = argumentsList.includes("--safe-mode")
+    || (settingSourcesIndex >= 0 && argumentsList[settingSourcesIndex + 1] === "");
+  process.stdout.write(`${JSON.stringify({
+    type: "system",
+    subtype: "init",
+    session_id: envelope.session_id,
+    plugins: isolated ? [] : [{ name: "claude-mem@fixture", path: "/private/fixture" }],
+  })}\n`);
+  if (emittedAssistantText !== undefined) {
+    process.stdout.write(`${JSON.stringify({
+      type: "assistant",
+      parent_tool_use_id: null,
+      session_id: envelope.session_id,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: emittedAssistantText }],
+      },
+    })}\n`);
+  }
+  process.stdout.write(`${JSON.stringify(envelope)}\n`);
+} else {
+  process.stdout.write(JSON.stringify(envelope));
 }

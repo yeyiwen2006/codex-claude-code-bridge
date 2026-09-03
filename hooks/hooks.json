@@ -1,5 +1,5 @@
 {
-  "description": "Deterministic claude commands, App /claude aliases, and private clipboard-image cleanup.",
+  "description": "Deterministic claude commands with synchronous results, App /claude aliases, interrupt cancellation, and private clipboard-image cleanup.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -8,7 +8,19 @@
             "type": "command",
             "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
             "commandWindows": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts','command-hook.mjs')).href)\"",
-            "timeout": 3600
+            "timeout": 3660
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/scripts/command-hook.mjs\"",
+            "commandWindows": "node -e \"import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts','command-hook.mjs')).href)\"",
+            "timeout": 3
           }
         ]
       }

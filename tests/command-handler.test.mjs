@@ -227,3 +227,68 @@ test("rejects session mutation commands while a Claude job is active", async () 
   assert.equal(state.claudeSessionId, "11111111-2222-4333-8444-555555555555");
   assert.equal(state.forkNext, false);
 });
+
+test("processes one App or CLI turn only once when duplicate hook instances race", async () => {
+  const sessionId = "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb";
+  const environment = { ...process.env, PLUGIN_DATA: pluginData };
+  let starts = 0;
+  const dependencies = {
+    environment,
+    startClaudeJob: async () => {
+      starts += 1;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return `final-${starts}`;
+    },
+  };
+  const base = {
+    hook_event_name: "UserPromptSubmit",
+    session_id: sessionId,
+    cwd: projectDirectory,
+    transcript_path: transcriptPath,
+  };
+
+  await handleHookEvent({ ...base, prompt: "/claude access allow ." }, dependencies);
+  const duplicateInput = {
+    ...base,
+    turn_id: "11111111-2222-4333-8444-555555555555",
+    prompt: "/claude run -- duplicate App turn",
+  };
+  const duplicateOutputs = await Promise.all([
+    handleHookEvent(duplicateInput, dependencies),
+    handleHookEvent(duplicateInput, dependencies),
+  ]);
+  assert.equal(starts, 1);
+  assert.equal(duplicateOutputs.filter((entry) => entry === null).length, 1);
+  assert.equal(duplicateOutputs.filter((entry) => /final-1/.test(entry?.reason ?? "")).length, 1);
+
+  const cliOutput = await handleHookEvent({
+    ...base,
+    turn_id: "22222222-3333-4444-8555-666666666666",
+    prompt: "claude run -- distinct CLI turn",
+  }, dependencies);
+  assert.match(cliOutput.reason, /final-2/);
+  assert.equal(starts, 2);
+
+  await handleHookEvent({
+    hook_event_name: "SessionEnd",
+    session_id: sessionId,
+    cwd: projectDirectory,
+  }, dependencies);
+  await assert.rejects(access(path.join(pluginData, "state", "turn-receipts", sessionId)));
+});
+
+test("routes Codex Interrupt to the active Claude job cancellation path", async () => {
+  let interrupted = 0;
+  const output = await handleHookEvent({
+    hook_event_name: "Interrupt",
+    session_id: "eeeeeeee-ffff-4000-8aaa-cccccccccccc",
+    cwd: projectDirectory,
+  }, {
+    environment: { ...process.env, PLUGIN_DATA: pluginData },
+    interruptClaudeJob: async () => {
+      interrupted += 1;
+    },
+  });
+  assert.equal(output, null);
+  assert.equal(interrupted, 1);
+});

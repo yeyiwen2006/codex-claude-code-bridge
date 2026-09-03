@@ -429,7 +429,9 @@ export function buildNativeClaudeArguments(input, options = {}) {
   const argumentsList = [
     "-p",
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
+    "--include-hook-events",
     "--permission-mode",
     permissionMode,
     "--no-chrome",
@@ -495,6 +497,92 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function assistantText(record) {
+  if (record.type !== "assistant" || record.parent_tool_use_id) {
+    return "";
+  }
+  const content = isRecord(record.message) && Array.isArray(record.message.content)
+    ? record.message.content
+    : [];
+  return content
+    .filter((block) => isRecord(block) && block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+}
+
+function pluginName(entry) {
+  if (typeof entry === "string") return entry.slice(0, 200);
+  if (!isRecord(entry)) return null;
+  const candidate = typeof entry.name === "string"
+    ? entry.name
+    : typeof entry.id === "string"
+      ? entry.id
+      : null;
+  return candidate?.slice(0, 200) ?? null;
+}
+
+function parseStreamJsonOutput(stdout) {
+  const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  let finalRecord;
+  let lastAssistantText = "";
+  let assistantMessageCount = 0;
+  let malformedLines = 0;
+  let loadedPlugins = [];
+  let pluginErrors = [];
+  const eventCounts = {};
+
+  for (const line of lines) {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      malformedLines += 1;
+      continue;
+    }
+    if (!isRecord(record)) continue;
+    const key = `${typeof record.type === "string" ? record.type : "unknown"}/${typeof record.subtype === "string" ? record.subtype : "message"}`;
+    eventCounts[key] = (eventCounts[key] ?? 0) + 1;
+    const text = assistantText(record);
+    if (record.type === "assistant" && !record.parent_tool_use_id) {
+      assistantMessageCount += 1;
+      if (text) lastAssistantText = text;
+    }
+    if (record.type === "system" && record.subtype === "init") {
+      loadedPlugins = Array.isArray(record.plugins)
+        ? record.plugins.map(pluginName).filter(Boolean).slice(0, 100)
+        : [];
+      pluginErrors = Array.isArray(record.plugin_errors)
+        ? record.plugin_errors.filter(isRecord).map((entry) => ({
+            plugin: pluginName(entry.plugin) ?? pluginName(entry),
+            type: typeof entry.type === "string" ? entry.type.slice(0, 100) : "unknown",
+          })).slice(0, 100)
+        : [];
+    }
+    if (record.type === "result") {
+      finalRecord = record;
+    }
+  }
+
+  let warning;
+  if (lines.length === 0) {
+    warning = "Claude Code returned no stdout.";
+  } else if (!finalRecord) {
+    warning = "Claude Code stream did not contain a final result envelope.";
+  } else if (malformedLines > 0) {
+    warning = `Claude Code stream contained ${malformedLines} malformed line(s).`;
+  }
+  return {
+    parsed: finalRecord,
+    warning,
+    lastAssistantText,
+    assistantMessageCount,
+    eventCounts,
+    loadedPlugins,
+    pluginErrors,
+  };
+}
+
 function executableIdentity(commandConfiguration) {
   let executableMetadata = "unavailable";
   try {
@@ -554,17 +642,25 @@ function promptWithImages(input) {
   ].join("\n");
 }
 
-function normalizeClaudeResult(processResult) {
-  const { parsed, warning } = parseJsonOutput(processResult.stdout);
+function normalizeClaudeResult(processResult, options = {}) {
+  const stream = options.streamJson === true
+    ? parseStreamJsonOutput(processResult.stdout)
+    : null;
+  const { parsed, warning } = stream ?? parseJsonOutput(processResult.stdout);
   const record = isRecord(parsed) ? parsed : {};
   const protocolSuccess = record.type === "result"
     && record.subtype === "success"
     && record.is_error !== true;
-  const resultText = typeof record.result === "string"
+  const envelopeResult = typeof record.result === "string"
     ? record.result
     : Array.isArray(record.errors)
       ? record.errors.map((entry) => String(entry)).join("\n")
-      : processResult.stdout.trim();
+      : options.streamJson === true
+        ? ""
+        : processResult.stdout.trim();
+  const originalResultEmpty = typeof record.result !== "string" || record.result.trim().length === 0;
+  const recoveredResult = protocolSuccess && originalResultEmpty && Boolean(stream?.lastAssistantText);
+  const resultText = recoveredResult ? stream.lastAssistantText : envelopeResult;
   const stderr = processResult.stderr.trim();
 
   const normalized = {
@@ -575,6 +671,15 @@ function normalizeClaudeResult(processResult) {
     exit_signal: processResult.exitSignal ?? null,
     elapsed_ms: processResult.elapsedMs,
   };
+
+  if (options.streamJson === true) {
+    normalized.original_result_empty = originalResultEmpty;
+    normalized.result_recovered_from_stream = recoveredResult;
+    normalized.stream_assistant_messages = stream.assistantMessageCount;
+    normalized.stream_event_counts = stream.eventCounts;
+    normalized.loaded_plugins = stream.loadedPlugins;
+    normalized.plugin_errors = stream.pluginErrors;
+  }
 
   if (typeof record.type === "string") {
     normalized.type = record.type;
@@ -663,7 +768,7 @@ export async function runClaudeNative(input, options = {}) {
     stdinText: promptWithImages(input),
     inheritFullEnvironment: true,
   });
-  return normalizeClaudeResult(processResult);
+  return normalizeClaudeResult(processResult, { streamJson: true });
 }
 
 export async function getClaudeHealth(options = {}) {

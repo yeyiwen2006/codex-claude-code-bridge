@@ -10,6 +10,7 @@ import {
   buildNativeClaudeArguments,
   getClaudeHealth,
   runClaude,
+  runClaudeNative,
 } from "../server/lib/claude-runner.mjs";
 import { normalizeRunInput } from "../server/lib/validation.mjs";
 
@@ -65,10 +66,24 @@ test("builds native bypass arguments without bridge tool or network denials", as
   assert.ok(argumentsList.includes("bypassPermissions"));
   assert.ok(argumentsList.includes("--allow-dangerously-skip-permissions"));
   assert.ok(argumentsList.includes("--permission-prompt-tool"));
+  assert.equal(argumentsList[argumentsList.indexOf("--output-format") + 1], "stream-json");
+  assert.ok(argumentsList.includes("--verbose"));
+  assert.ok(argumentsList.includes("--include-hook-events"));
   assert.equal(argumentsList.includes("--tools"), false);
   assert.equal(argumentsList.includes("--allowed-tools"), false);
   assert.equal(argumentsList.includes("--disallowed-tools"), false);
   assert.equal(argumentsList.some((entry) => /Bash|PowerShell|WebFetch|WebSearch|mcp__\*/.test(entry)), false);
+});
+
+test("isolates native customization sources exactly as configured", async () => {
+  const safe = buildNativeClaudeArguments(await makeInput({ customization_sources: "safe" }));
+  const pluginOnly = buildNativeClaudeArguments(await makeInput({ customization_sources: "plugin-only" }));
+  const all = buildNativeClaudeArguments(await makeInput({ customization_sources: "all" }));
+
+  assert.ok(safe.includes("--safe-mode"));
+  assert.equal(pluginOnly[pluginOnly.indexOf("--setting-sources") + 1], "");
+  assert.equal(all.includes("--safe-mode"), false);
+  assert.equal(all.includes("--setting-sources"), false);
 });
 
 test("loads explicit plugins without user or project setting sources", async () => {
@@ -97,6 +112,34 @@ test("normalizes successful Claude JSON output", async () => {
   assert.equal(result.session_id, "11111111-2222-4333-8444-555555555555");
   assert.equal(result.total_cost_usd, 0);
   assert.deepEqual(result.permission_denials, []);
+});
+
+test("recovers an empty final envelope from the last main assistant stream message", async () => {
+  const result = await runClaudeNative(await makeInput({
+    prompt: "__EMPTY_WITH_ASSISTANT__",
+    customization_sources: "plugin-only",
+  }), { commandConfiguration });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result, "recovered assistant text");
+  assert.equal(result.original_result_empty, true);
+  assert.equal(result.result_recovered_from_stream, true);
+  assert.equal(result.stream_assistant_messages, 1);
+  assert.deepEqual(result.loaded_plugins, []);
+});
+
+test("keeps a genuinely empty stream empty and reports loaded customizations without retrying", async () => {
+  const result = await runClaudeNative(await makeInput({
+    prompt: "__EMPTY__",
+    customization_sources: "all",
+  }), { commandConfiguration });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.result, "");
+  assert.equal(result.original_result_empty, true);
+  assert.equal(result.result_recovered_from_stream, false);
+  assert.deepEqual(result.loaded_plugins, ["claude-mem@fixture"]);
+  assert.equal(result.num_turns, 1);
 });
 
 test("passes a resume session without using continue", async () => {

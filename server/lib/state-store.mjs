@@ -151,11 +151,19 @@ async function lockOwnerIsRunning(lockPath) {
   }
 }
 
-async function acquireLock(dataRoot, name) {
+async function acquireLock(dataRoot, name, options = {}) {
   validateIdentifier(name, "Lock name");
+  const waitMs = options.waitMs ?? LOCK_WAIT_MS;
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  if (!Number.isSafeInteger(waitMs) || waitMs < 0) {
+    throw new InputError("Lock wait time must be a non-negative integer.");
+  }
+  if (!Number.isSafeInteger(staleMs) || staleMs <= 0) {
+    throw new InputError("Lock stale time must be a positive integer.");
+  }
   await ensureDataDirectories(dataRoot);
   const lockPath = path.join(dataRoot, "locks", `${name}.lock`);
-  const deadline = Date.now() + LOCK_WAIT_MS;
+  const deadline = Date.now() + waitMs;
   while (true) {
     try {
       const handle = await open(lockPath, "wx", 0o600);
@@ -167,7 +175,7 @@ async function acquireLock(dataRoot, name) {
       }
       try {
         const details = await stat(lockPath);
-        if (Date.now() - details.mtimeMs > LOCK_STALE_MS || !(await lockOwnerIsRunning(lockPath))) {
+        if (Date.now() - details.mtimeMs > staleMs || !(await lockOwnerIsRunning(lockPath))) {
           await unlink(lockPath);
           continue;
         }
@@ -185,8 +193,8 @@ async function acquireLock(dataRoot, name) {
   }
 }
 
-export async function withStateLock(dataRoot, name, operation) {
-  const lock = await acquireLock(dataRoot, name);
+export async function withStateLock(dataRoot, name, operation, options = {}) {
+  const lock = await acquireLock(dataRoot, name, options);
   try {
     return await operation();
   } finally {
