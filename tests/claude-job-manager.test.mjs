@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { approvalText, resolveClaudeApproval } from "../server/lib/claude-job-manager.mjs";
+import { approvalText, cancelClaudeJob, describeClaudeJob, resolveClaudeApproval } from "../server/lib/claude-job-manager.mjs";
 import {
   loadSessionState,
   saveSessionState,
@@ -24,6 +24,42 @@ test("a submitted decision is described as resuming instead of repeating the old
   assert.match(text, /已提交/);
   assert.match(text, /正在从暂停处恢复/);
   assert.doesNotMatch(text, /真实的权限请求/);
+});
+
+test("cancelling a waiting job waits for termination and never offers stale approvals", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-cancel-waiting-"));
+  try {
+    await saveSessionState(dataRoot, sessionId, { activeJob: {
+      id: jobId, status: "waiting", cancelRequested: false, decision: null,
+      pendingApproval: { id: approvalId, toolName: "Bash", inputText: "{}" },
+    } });
+    let settled = false;
+    const response = cancelClaudeJob({ jobId }, { dataRoot, sessionId })
+      .then((value) => { settled = true; return value; });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await loadSessionState(dataRoot, sessionId)).activeJob.cancelRequested) break;
+      await delay(10);
+    }
+    await delay(180);
+    assert.equal(settled, false);
+    const job = (await loadSessionState(dataRoot, sessionId)).activeJob;
+    assert.equal(job.cancelRequested, true);
+    assert.match(approvalText(job), /正在取消/);
+    assert.doesNotMatch(approvalText(job), /claude allow|真实的权限请求/);
+    assert.match(await describeClaudeJob({ dataRoot, sessionId }), /正在取消/);
+    await assert.rejects(resolveClaudeApproval({ kind: "allow", approvalId }, { dataRoot, sessionId }), /没有找到/);
+    await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+      const state = await loadSessionState(dataRoot, sessionId);
+      state.activeJob.status = "cancelled";
+      state.activeJob.pendingApproval = null;
+      state.activeJob.error = "cancelled fixture";
+      await saveSessionState(dataRoot, sessionId, state);
+    });
+    assert.doesNotMatch(await response, /claude allow|原进程正在等待/);
+    assert.equal((await loadSessionState(dataRoot, sessionId)).activeJob, null);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
 });
 
 async function delay(milliseconds) {

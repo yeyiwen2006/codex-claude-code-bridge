@@ -76,11 +76,15 @@ When enabled, the bridge reads the current Codex transcript path supplied by the
 
 Use `claude config set conversation-context off` before a task when the current Codex conversation should not be disclosed to Claude.
 
+Bridge history also stores bounded current requests and Claude results under the task's plugin data. Undelivered results are supplied to Codex through `UserPromptSubmit.additionalContext`, explicitly labeled as untrusted historical data rather than instructions or authorization. Later Claude calls can receive history for the same authorized root. Disabling `conversation-context` pauses both directions; it does not retract previously delivered context or erase saved history. Session clearing, authorization changes/revocation, and task cleanup clear the bridge history.
+
 ## Claude customizations
 
 `customizations=all` uses Claude's normal user, project, and local settings cascade and is the default for new installs. Loaded CLAUDE.md files, Skills, Hooks, plugins, MCP servers, and settings are trusted Claude inputs and code. They may execute local programs, use credentials, send network requests, or modify files.
 
 Use `safe` to disable filesystem customization sources while troubleshooting, or `plugin-only` to load only explicit local plugin paths. Neither choice turns the bridge into a complete sandbox.
+
+Native Claude transcript files remain enabled when customizations may have hooks that read `transcript_path`, even if the bridge's `persist-session` option is off. That option controls automatic resumption, not deletion of Claude's own files. `safe`, or `plugin-only` without explicit plugins, retains the no-session-files behavior when resumption is off. Native transcripts and any copies retained by third-party memory hooks follow those tools' storage policies and are not deleted by bridge task cleanup.
 
 ## Process and credential handling
 

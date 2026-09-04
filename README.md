@@ -142,6 +142,8 @@ claude cancel 1a2b3c4d
 
 同一个 Codex 或 ChatGPT Work 任务的 `turn_id` 即使被重复加载的 Hook 实例并发收到，也只执行一次；其余实例静默退出，避免一条提交产生两个相同结果。
 
+取消已提交时不会再展示旧审批；插件会等待取消完成，或明确提示“正在取消”。`deny` 拒绝当前一次工具调用并把理由交给 Claude，不会自动生成永久禁用规则；要结束整个任务请使用 `cancel`。正常结果已经返回后，`result` 不会重新执行任务，也不是历史查询入口。
+
 ## 当前 Codex 或 ChatGPT Work 对话继承
 
 `run`、`plan`、`image run`、`skill run` 默认读取 Hook 提供的 `transcript_path`，提取当前 Codex 或 ChatGPT Work 任务中可见的用户消息和助手回复，并把本次任务放在最前面交给 Claude Code。你可以直接要求 Claude Code 根据上文继续尚未完成的工作，例如：
@@ -157,7 +159,11 @@ claude config set conversation-context off
 claude config set conversation-context on
 ```
 
-对话中可能包含秘密、专有材料或提示词注入。关闭继承只影响后续调用。
+Claude 的当前请求和最终回复也会保存在同一任务的桥接历史中。在下一条普通 Codex 消息提交时，插件通过 Hook 的 `additionalContext` 传入尚未交付的记录；后续 Claude 调用也能读取同一授权项目的桥接历史。结果带有来源和成功、失败或取消状态，不会被当作新的指令或授权。同一结果不会在每条普通消息中重复注入。
+
+桥接历史最多保留 10 次调用，并有总长度和单条长度限制；超长内容会明确标注截断。清除 Claude 会话、更换授权根目录、撤销授权或结束任务会清除相应桥接历史。更新前只显示在 Hook 中的旧回复不会自动补录。
+
+`conversation-context off` 暂停后续的双向上下文传递，不删除已有记录；重新开启后可以继续传递。已进入模型上下文的内容不会被撤回。对话中可能包含秘密、专有材料或提示词注入。
 
 ## 多张原图
 
@@ -230,6 +236,8 @@ claude session fork
 
 成功调用后保存 Claude session ID；同一授权根目录中的下一次调用可以恢复。`session fork` 让下一次恢复产生新的 Claude 会话分支。
 
+`persist-session` 控制桥接器是否自动恢复上次 Claude 会话。关闭时，每次调用仍创建新 Claude 会话。加载用户、项目或显式插件配置时，桥接器会保留 Claude 原生会话记录，供依赖 `transcript_path` 的 Hooks 使用；这与自动续接会话是两回事。`safe` 或未添加显式插件的 `plugin-only` 在关闭自动恢复时仍禁用原生会话记录。元数据中的 `native_session_files` 显示实际行为。
+
 ## 完整命令入口
 
 发送 `claude help` 获取当前安装版本的准确命令列表。常用入口：
@@ -254,6 +262,7 @@ claude result
 ## 已知边界与排查
 
 - Claude Code 偶尔会以成功状态结束但返回空的最终 `result`，尤其是加载用户或项目自定义项时。确定性命令使用 `stream-json`，会先恢复主会话最后一条非空 assistant 文本；若最终 envelope 和 assistant 流都为空，插件会显示回合数、费用、已加载插件和 stream 事件计数，并且不会自动重试。需要做一次低成本隔离复测时，先执行 `claude config set customizations plugin-only` 或 `safe`，再设置较小的 `max-budget-usd`，然后检查 Claude Hooks、插件和设置。
+- 若空结果同时伴随结束 Hook 错误和多次主会话回复，插件按顺序保留这些回复，避免只恢复“同前”等尾句而丢失原答案。`hook_failures` 会标记错误及会话记录缺失。已修复的兼容问题是：禁止会话记录时，claude-mem 等插件的结束 Hook 找不到文件，反复把错误送回 Claude。
 - 继承的 Codex 或 ChatGPT Work 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `claude config set conversation-context off`，再用独立、明确的提示词重试。
 - Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。Hook 信任可在 Codex App 的“设置”→“钩子”或交互式 Codex CLI 的 `/hooks` 中完成；排障时不要使用非交互 `codex exec`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。

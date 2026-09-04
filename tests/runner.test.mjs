@@ -104,6 +104,33 @@ test("loads explicit plugins without user or project setting sources", async () 
   assert.equal(argumentsList.includes("Bash,PowerShell,WebFetch,WebSearch,mcp__*"), false);
 });
 
+test("keeps hook transcript files while fresh calls still omit session resumption", async () => {
+  for (const customization of ["all", "user", "project"]) {
+    const input = await makeInput({ customization_sources: customization, persist_session: false });
+    const args = buildNativeClaudeArguments(input);
+    assert.equal(args.includes("--no-session-persistence"), false);
+    assert.equal(args.includes("--resume"), false);
+    assert.equal(args.includes("--continue"), false);
+  }
+  for (const customization of ["safe", "plugin-only"]) {
+    const args = buildNativeClaudeArguments(await makeInput({ customization_sources: customization, persist_session: false }));
+    assert.ok(args.includes("--no-session-persistence"));
+  }
+  const withPlugin = await normalizeRunInput({ prompt: "fixture", working_directory: temporaryDirectory,
+    customization_sources: "plugin-only", persist_session: false, plugin_directories: [temporaryDirectory],
+    allow_plugin_tools: true }, { allowPluginDirectories: true });
+  assert.equal(buildNativeClaudeArguments(withPlugin).includes("--no-session-persistence"), false);
+});
+
+test("retains the original answer when failed Stop hooks produce a short repeated reply", async () => {
+  const result = await runClaudeNative(await makeInput({ prompt: "__STOP_HOOK_LOOP__" }), { commandConfiguration });
+  assert.equal(result.result_recovered_from_stream, true);
+  assert.equal(result.recovery_includes_history, true);
+  assert.match(result.result, /BRIDGE_APP_OK，中文正常/);
+  assert.match(result.result, /同前/);
+  assert.equal(result.hook_failures[0].transcript_missing, true);
+});
+
 test("normalizes successful Claude JSON output", async () => {
   const result = await runClaude(await makeInput(), { commandConfiguration });
 

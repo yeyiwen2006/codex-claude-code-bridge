@@ -28,10 +28,14 @@ export function formatClaudeJobResult(result, request) {
     stream_event_counts: result.stream_event_counts ?? null,
     loaded_plugins: result.loaded_plugins ?? [],
     plugin_errors: result.plugin_errors ?? [],
+    hook_failures: result.hook_failures ?? [],
+    recovery_includes_history: result.recovery_includes_history ?? false,
+    native_session_files: result.native_session_files ?? null,
     permission_mode: request.input.permissionMode,
     customizations: request.input.customizationSources,
     codex_conversation_messages: request.conversation?.messageCount ?? 0,
     codex_conversation_truncated: request.conversation?.truncated ?? false,
+    claude_history_entries: request.conversation?.bridgeHistoryEntries ?? 0,
   };
   const primary = emptyResult
     ? result.ok
@@ -41,5 +45,8 @@ export function formatClaudeJobResult(result, request) {
         ].join("\n")
       : "Claude Code 未成功完成，也没有返回结果正文；请查看下方诊断元数据。"
     : result.result;
-  return `${primary}\n\n[Codex Claude Code Bridge 元数据]\n${JSON.stringify(metadata, null, 2)}`;
+  const hookNote = result.hook_failures?.length > 0
+    ? "\n\n诊断：Claude 自定义 Hook 曾返回错误。若出现重复回复或反复寻找会话记录，请检查下方 hook_failures；桥接器未重新发送任务。"
+    : "";
+  return `${primary}${hookNote}\n\n[Codex Claude Code Bridge 元数据]\n${JSON.stringify(metadata, null, 2)}`;
 }

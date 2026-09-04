@@ -56,6 +56,9 @@ function spawnWorker(dataRoot, sessionId, jobId, environment) {
 }
 
 export function approvalText(job) {
+  if (job.cancelRequested) {
+    return `Claude Code 任务 ${job.id} 正在取消；无需处理此前的权限请求。可用 claude status 查看最终状态。`;
+  }
   if (job.decision) {
     return `权限决定 ${job.decision.action} 已提交；Claude Code 任务 ${job.id} 正在从暂停处恢复。可用 claude status 查看进度，或 claude cancel ${job.id} 取消。`;
   }
@@ -97,6 +100,7 @@ export function synchronousWaitMilliseconds(timeoutSeconds) {
 }
 
 function synchronousWaitExpiredText(job) {
+  if (job.cancelRequested) return approvalText(job);
   return [
     `Claude Code 任务 ${job.id} 尚未在同步等待保护窗口内写入终态。`,
     "后台 worker 仍保留，以免 Hook 超时中断正在收尾的 Claude 进程。",
@@ -125,7 +129,7 @@ export async function waitForJobEvent(dataRoot, sessionId, jobId, waitMs = EVENT
     if (!job || job.id !== jobId) {
       return "Claude Code 任务状态已不存在；它可能已被清理。";
     }
-    if (job.status === "waiting" && !job.decision) {
+    if (job.status === "waiting" && !job.decision && !job.cancelRequested) {
       return approvalText(job);
     }
     if (["completed", "failed", "cancelled"].includes(job.status)) {
@@ -191,6 +195,7 @@ export async function describeClaudeJob(context) {
   const state = await loadSessionState(context.dataRoot, context.sessionId);
   const job = state.activeJob;
   if (!job) return "无";
+  if (activeStatus(job) && job.cancelRequested) return `正在取消（任务 ${job.id}）`;
   if (job.status === "waiting") return `等待审批 ${job.pendingApproval?.id ?? "?"}（任务 ${job.id}）`;
   if (["completed", "failed", "cancelled"].includes(job.status)) {
     return `${job.status}（任务 ${job.id}；发送 claude result 读取结果）`;
@@ -215,6 +220,7 @@ export async function resolveClaudeApproval(command, context) {
       || job.status !== "waiting"
       || job.pendingApproval?.id !== command.approvalId
       || job.decision
+      || job.cancelRequested
     ) {
       throw new Error("没有找到该权限请求；它可能已处理、过期或不属于当前 Codex 会话。");
     }

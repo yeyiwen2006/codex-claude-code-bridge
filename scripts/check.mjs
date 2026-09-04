@@ -56,6 +56,7 @@ const sourceFiles = [
   "server/lib/command-parser.mjs",
   "server/lib/command-handler.mjs",
   "server/lib/codex-transcript.mjs",
+  "server/lib/bridge-history.mjs",
   "server/lib/claude-job-manager.mjs",
   "server/lib/claude-job-worker.mjs",
   "server/lib/claude-result-text.mjs",

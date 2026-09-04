@@ -77,7 +77,7 @@ if (prompt === "__CLAUDE_ERROR__") {
   const sessionId = resumeIndex >= 0
     ? argumentsList[resumeIndex + 1]
     : "11111111-2222-4333-8444-555555555555";
-  const emptyEnvelope = prompt === "__EMPTY__" || prompt === "__EMPTY_WITH_ASSISTANT__";
+  const emptyEnvelope = ["__EMPTY__", "__EMPTY_WITH_ASSISTANT__", "__STOP_HOOK_LOOP__"].includes(prompt);
   const resultText = emptyEnvelope ? "" : `mock:${prompt}`;
   emittedAssistantText = prompt === "__EMPTY__"
     ? undefined
@@ -112,6 +112,15 @@ if (outputFormat === "stream-json") {
     session_id: envelope.session_id,
     plugins: isolated ? [] : [{ name: "claude-mem@fixture", path: "/private/fixture" }],
   })}\n`);
+  if (prompt === "__STOP_HOOK_LOOP__") {
+    for (const record of [
+      { type: "assistant", message: { content: [{ type: "text", text: "BRIDGE_APP_OK，中文正常。" }] } },
+      { type: "system", subtype: "hook_response", hook_name: "Stop", hook_event: "Stop", exit_code: 2,
+        stderr: "Hook error: Transcript path missing or file does not exist: fixture.jsonl" },
+      { type: "assistant", message: { content: [{ type: "text", text: "（同前）" }] } },
+    ]) process.stdout.write(`${JSON.stringify(record)}\n`);
+    emittedAssistantText = undefined;
+  }
   if (emittedAssistantText !== undefined) {
     process.stdout.write(`${JSON.stringify({
       type: "assistant",

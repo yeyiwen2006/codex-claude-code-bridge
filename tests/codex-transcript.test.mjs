@@ -74,6 +74,22 @@ test("keeps the current task first so Claude skill commands remain invocable", (
   assert.match(result.prompt, /<codex_conversation>/);
   assert.match(result.prompt, /检查权限边界/);
   assert.equal(result.contextTruncated, false);
+  assert.doesNotMatch(result.prompt, /先核对磁盘/);
+  assert.match(result.prompt, /不要为了补齐上下文寻找/);
+});
+
+test("does not inherit generated host scaffolding as visible user conversation", async () => {
+  const scaffolding = "<recommended_plugins>private list</recommended_plugins>\n# AGENTS.md instructions for C:/fixture\n\n<INSTRUCTIONS>project instructions</INSTRUCTIONS>\n<environment_context>host setup</environment_context>";
+  const filePath = await transcript([
+    message("user", scaffolding),
+    message("user", "上下文标记 APP_CONTEXT_42"),
+  ]);
+  const result = await readCodexConversation(filePath);
+  assert.equal(result.messageCount, 1);
+  assert.match(result.text, /APP_CONTEXT_42/);
+  assert.doesNotMatch(result.text, /recommended_plugins|host setup/);
+  const mixed = await transcript([message("user", `${scaffolding}\n这是用户的真实请求，请解释这些设置。`)]);
+  assert.match((await readCodexConversation(mixed)).text, /这是用户的真实请求/);
 });
 
 test("keeps a large current task intact and trims inherited context to the prompt limit", () => {

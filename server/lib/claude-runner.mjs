@@ -424,6 +424,13 @@ export function buildClaudeArguments(input) {
   return argumentsList;
 }
 
+export function nativeSessionFilesEnabled(input) {
+  // Session resumption and transcript storage are separate concerns. Loaded
+  // hooks may read transcript_path even when every bridge call starts fresh.
+  return input.persistSession || (input.customizationSources !== "safe"
+    && (input.customizationSources !== "plugin-only" || input.pluginDirectories.length > 0));
+}
+
 export function buildNativeClaudeArguments(input, options = {}) {
   const permissionMode = input.permissionMode === "default" ? "manual" : input.permissionMode;
   const argumentsList = [
@@ -467,7 +474,7 @@ export function buildNativeClaudeArguments(input, options = {}) {
     argumentsList.push("--resume", input.sessionId);
     if (input.forkSession) argumentsList.push("--fork-session");
   }
-  if (!input.persistSession) argumentsList.push("--no-session-persistence");
+  if (!nativeSessionFilesEnabled(input)) argumentsList.push("--no-session-persistence");
   if (input.model) argumentsList.push("--model", input.model);
   if (input.effort) argumentsList.push("--effort", input.effort);
   if (input.maxBudgetUsd !== undefined) argumentsList.push("--max-budget-usd", String(input.maxBudgetUsd));
@@ -530,6 +537,8 @@ function parseStreamJsonOutput(stdout) {
   let malformedLines = 0;
   let loadedPlugins = [];
   let pluginErrors = [];
+  const assistantTexts = [];
+  const hookFailures = [];
   const eventCounts = {};
 
   for (const line of lines) {
@@ -546,7 +555,20 @@ function parseStreamJsonOutput(stdout) {
     const text = assistantText(record);
     if (record.type === "assistant" && !record.parent_tool_use_id) {
       assistantMessageCount += 1;
-      if (text) lastAssistantText = text;
+      if (text) {
+        lastAssistantText = text;
+        if (assistantTexts.at(-1) !== text) assistantTexts.push(text);
+      }
+    }
+    if (record.type === "system" && record.subtype === "hook_response"
+      && (record.exit_code > 0 || record.outcome === "error" || record.outcome === "cancelled")) {
+      if (hookFailures.length < 20) hookFailures.push({
+        hook: String(record.hook_name ?? "unknown").slice(0, 100),
+        event: String(record.hook_event ?? "unknown").slice(0, 100),
+        exit_code: record.exit_code ?? null,
+        transcript_missing: /transcript (?:path|file).*(?:missing|does not exist|not found)/i.test(
+          `${record.stderr ?? ""}\n${record.stdout ?? ""}`),
+      });
     }
     if (record.type === "system" && record.subtype === "init") {
       loadedPlugins = Array.isArray(record.plugins)
@@ -580,6 +602,8 @@ function parseStreamJsonOutput(stdout) {
     eventCounts,
     loadedPlugins,
     pluginErrors,
+    assistantTexts,
+    hookFailures,
   };
 }
 
@@ -660,7 +684,15 @@ function normalizeClaudeResult(processResult, options = {}) {
         : processResult.stdout.trim();
   const originalResultEmpty = typeof record.result !== "string" || record.result.trim().length === 0;
   const recoveredResult = protocolSuccess && originalResultEmpty && Boolean(stream?.lastAssistantText);
-  const resultText = recoveredResult ? stream.lastAssistantText : envelopeResult;
+  const recoveryIncludesHistory = recoveredResult
+    && stream.hookFailures.some((failure) => failure.event === "Stop")
+    && stream.assistantTexts.length > 1;
+  const resultText = recoveryIncludesHistory
+    ? [
+        "Claude Code 最终结果为空，且结束 Hook 发生错误。以下保留主会话回复顺序，避免只显示最后一句而丢失先前答案：",
+        ...stream.assistantTexts.map((text, index) => `[回复 ${index + 1}]\n${text}`),
+      ].join("\n\n")
+    : recoveredResult ? stream.lastAssistantText : envelopeResult;
   const stderr = processResult.stderr.trim();
 
   const normalized = {
@@ -679,6 +711,8 @@ function normalizeClaudeResult(processResult, options = {}) {
     normalized.stream_event_counts = stream.eventCounts;
     normalized.loaded_plugins = stream.loadedPlugins;
     normalized.plugin_errors = stream.pluginErrors;
+    normalized.hook_failures = stream.hookFailures;
+    normalized.recovery_includes_history = Boolean(recoveryIncludesHistory);
   }
 
   if (typeof record.type === "string") {
@@ -768,7 +802,10 @@ export async function runClaudeNative(input, options = {}) {
     stdinText: promptWithImages(input),
     inheritFullEnvironment: true,
   });
-  return normalizeClaudeResult(processResult, { streamJson: true });
+  return {
+    ...normalizeClaudeResult(processResult, { streamJson: true }),
+    native_session_files: nativeSessionFilesEnabled(input),
+  };
 }
 
 export async function getClaudeHealth(options = {}) {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runClaudeNative } from "./claude-runner.mjs";
 import { formatClaudeJobResult } from "./claude-result-text.mjs";
+import { recordBridgeExchange } from "./bridge-history.mjs";
 import { clearQueuedImages } from "./image-queue.mjs";
 import {
   loadSessionState,
@@ -58,6 +59,11 @@ async function storeFinal(status, text, error, request) {
     job.error = error === undefined || error === null ? null : String(error).slice(0, 4_000);
     job.updatedAt = Date.now();
     if (!state.resultFiles.includes(resultPath)) state.resultFiles.push(resultPath);
+    recordBridgeExchange(state, request, {
+      id: jobId,
+      status,
+      text: request.responseText || text,
+    });
     return state.sessionEnded === true;
   });
   if (sessionEnded) {
@@ -117,6 +123,7 @@ async function main() {
       mcpConfig,
     });
     request.resultSessionId = result.session_id;
+    request.responseText = result.result;
     await storeFinal(
       result.ok ? "completed" : "failed",
       formatClaudeJobResult(result, request),

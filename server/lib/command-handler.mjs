@@ -17,6 +17,12 @@ import {
   readCodexConversation,
 } from "./codex-transcript.mjs";
 import {
+  clearBridgeHistory,
+  historyForDirectory,
+  historyForWorkingDirectory,
+  renderBridgeHistory,
+} from "./bridge-history.mjs";
+import {
   cancelClaudeJob,
   describeClaudeJob,
   interruptClaudeJob,
@@ -404,7 +410,7 @@ async function buildRunInput(request, state) {
   }, { allowPluginDirectories: true });
 }
 
-function makeRequest(command, config, authorization, conversation, sessionPermission) {
+function makeRequest(command, config, authorization, conversation, sessionPermission, bridgeHistory = []) {
   let prompt = command.prompt;
   if (command.kind === "skill-run" || command.kind === "image-skill") {
     const skill = validateSkillName(command.skill);
@@ -417,14 +423,16 @@ function makeRequest(command, config, authorization, conversation, sessionPermis
     throw new CommandError(`权限模式只能是 ${PERMISSION_NAMES.join("、")}。`);
   }
   const requestConfig = command.kind === "plan" ? { ...config, persistSession: false } : config;
-  const composed = composePromptWithCodexConversation(prompt, conversation);
+  const composed = composePromptWithCodexConversation(prompt, conversation, renderBridgeHistory(bridgeHistory));
   return {
+    taskPrompt: prompt,
     prompt: composed.prompt,
     conversation: {
       available: conversation.available,
       messageCount: conversation.messageCount,
       truncated: conversation.truncated || composed.contextTruncated,
       malformedLines: conversation.malformedLines,
+      bridgeHistoryEntries: bridgeHistory.length,
     },
     workingDirectory: authorization.cwd,
     authorizationRoot: authorization.root,
@@ -440,7 +448,8 @@ async function stageOrRun(command, context, config) {
   const conversation = config.conversationContext
     ? await readCodexConversation(context.transcriptPath, { currentPrompt: context.submittedPrompt })
     : { available: false, text: "", messageCount: 0, truncated: false, malformedLines: 0 };
-  const request = makeRequest(command, config, authorization, conversation, state.sessionPermission);
+  const history = config.conversationContext ? historyForDirectory(state, authorization.root) : [];
+  const request = makeRequest(command, config, authorization, conversation, state.sessionPermission, history);
   if (command.kind === "image-run" || command.kind === "image-skill") {
     if (state.images.length === 0) {
       throw new CommandError("图片队列为空。请先粘贴图片并执行 claude image add。");
@@ -631,6 +640,7 @@ async function executeCommand(command, context) {
           state.claudeSessionId = null;
           state.claudeSessionRoot = null;
           state.forkNext = false;
+          clearBridgeHistory(state);
         }
       });
       return `已授权目录：${authorizedRoot}\n授权有效期：4 小时。更换根目录会清除 Claude 恢复会话。`;
@@ -649,6 +659,7 @@ async function executeCommand(command, context) {
         state.claudeSessionId = null;
         state.claudeSessionRoot = null;
         state.forkNext = false;
+        clearBridgeHistory(state);
         return "目录授权已撤销；Claude 恢复会话已清除。图片队列未删除。";
       });
     case "image-add":
@@ -767,7 +778,8 @@ async function executeCommand(command, context) {
         state.claudeSessionId = null;
         state.claudeSessionRoot = null;
         state.forkNext = false;
-        return "桥接器保存的 Claude 会话 ID 已清除；Claude Code 自己的历史文件未删除。";
+        clearBridgeHistory(state);
+        return "桥接器保存的 Claude 会话 ID 和待传递的 Claude 对话历史已清除；Claude Code 自己的历史文件未删除。";
       });
     case "session-fork":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
@@ -793,6 +805,26 @@ function errorMessage(error) {
     return `${error.message ?? String(error)}（${error.code}）`;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+async function bridgeContextForCodex(input, dataRoot) {
+  if (typeof input.session_id !== "string" || typeof input.cwd !== "string") return null;
+  const config = validateConfig(await loadCommandConfig(dataRoot));
+  if (!config.conversationContext) return null;
+  const directory = await realpath(input.cwd);
+  return runHookCommandOnce(dataRoot, input.session_id, input.turn_id, () =>
+    mutateSession(dataRoot, input.session_id, async (state) => {
+      const delivered = new Set(state.bridgeHistoryDelivered ?? []);
+      const pending = historyForWorkingDirectory(state, directory).filter((entry) => !delivered.has(entry.id));
+      if (pending.length === 0) return null;
+      state.bridgeHistoryDelivered = [...delivered, ...pending.map((entry) => entry.id)];
+      return {
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: renderBridgeHistory(pending),
+        },
+      };
+    }));
 }
 
 export async function handleHookEvent(input, options = {}) {
@@ -825,7 +857,12 @@ export async function handleHookEvent(input, options = {}) {
     return { decision: "block", reason: `Codex Claude Code Bridge 命令错误：${errorMessage(error)}` };
   }
   if (command === null) {
-    return null;
+    try {
+      return await bridgeContextForCodex(input, dataRoot);
+    } catch {
+      // A broken bridge state must not prevent ordinary Codex conversations.
+      return null;
+    }
   }
 
   if (typeof input.session_id !== "string" || typeof input.cwd !== "string") {

@@ -63,6 +63,8 @@ export function defaultSessionState() {
     claudeSessionRoot: null,
     forkNext: false,
     resultFiles: [],
+    bridgeHistory: [],
+    bridgeHistoryDelivered: [],
   };
 }
 

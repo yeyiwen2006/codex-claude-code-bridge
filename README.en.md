@@ -117,6 +117,8 @@ claude cancel <job-id>
 
 If duplicate hook instances receive the same `turn_id` for a Codex or ChatGPT Work task concurrently, the command executes once and the other instances exit silently, so one submission does not create duplicate results.
 
+Once cancellation is requested, old approvals are no longer offered: the command waits for termination or explicitly reports cancellation in progress. `deny` rejects one tool call and returns its reason to Claude; it does not create a permanent deny rule. Use `cancel` to stop the task. After a normal result has been delivered, `result` is not a history lookup and never reruns the task.
+
 ## Codex or ChatGPT Work conversation inheritance
 
 `run`, `plan`, `image run`, and `skill run` read the hook's `transcript_path` by default, extract visible user messages and assistant replies from the current Codex or ChatGPT Work task, and place the current request first for Claude Code. You can ask Claude Code to continue the unfinished work using that context:
@@ -132,7 +134,11 @@ claude config set conversation-context off
 claude config set conversation-context on
 ```
 
-Conversation text can still contain secrets, proprietary material, or prompt injection.
+The bridge also retains the current request and final Claude response in the same task. The next ordinary Codex message receives undelivered exchanges through the hook's `additionalContext`; subsequent Claude calls receive the same authorized project's bridge history. Exchanges identify their source and completed, failed, or cancelled status and are historical data, not new instructions or permissions. A result is not injected on every ordinary message.
+
+History retains at most 10 calls with total and per-entry text limits and explicit truncation markers. Clearing the Claude session, changing or revoking the authorized root, or ending the task clears this history. Old hook-only responses from before the update are not imported automatically.
+
+`conversation-context off` pauses future context transfer in both directions without deleting stored history; re-enabling it permits transfer again. It cannot retract context already delivered to a model. Conversation text can still contain secrets, proprietary material, or prompt injection.
 
 ## Direct multi-image handoff
 
@@ -197,6 +203,8 @@ claude session fork
 
 Successful calls retain the Claude session ID and can resume inside the same authorized root. `session fork` forks the next resumed call.
 
+`persist-session` controls automatic Claude session resumption. When off, each call still starts a new Claude session. If user, project, or explicit plugin customizations are loaded, native Claude session files remain enabled for hooks that read `transcript_path`; this does not resume an earlier session. With `safe`, or `plugin-only` without explicit plugins, turning resumption off also disables native session files. The `native_session_files` metadata reports the effective behavior.
+
 ## Deterministic and model-directed paths
 
 The deterministic hook path handles `claude` before Codex or ChatGPT Work model inference, with `/claude` retained as an App alias. The current Codex hook response API cannot create a normal assistant bubble, so results appear as hook-block messages.
@@ -206,6 +214,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 ## Known boundaries and troubleshooting
 
 - Claude Code can occasionally return a successful envelope with an empty final `result`, especially when user or project customizations are loaded. Deterministic commands use `stream-json` and first recover the last non-empty main-session assistant text. If both the final envelope and assistant stream are empty, the bridge reports turn count, cost, loaded plugins, and stream event counts, and it does not retry automatically. For one low-cost isolation run, set `customizations` to `plugin-only` or `safe`, set a small `max-budget-usd`, and then inspect Claude hooks, plugins, and settings.
+- If an empty final envelope follows Stop hook failures and multiple main-session replies, recovery preserves those replies in order instead of losing the original answer to a short final repetition. `hook_failures` identifies failures and missing transcripts. The bridge keeps native transcripts for customizations to avoid the missing-file Stop loop observed with claude-mem.
 - The inherited Codex or ChatGPT Work conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
