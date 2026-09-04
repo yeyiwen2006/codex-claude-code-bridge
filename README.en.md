@@ -2,17 +2,23 @@
 
 [中文说明](./README.md)
 
-Codex Claude Code Bridge is an unofficial open-source local Codex plugin. It intercepts deterministic `claude` messages before the Codex model starts and invokes the local Claude Code CLI. Runtime approvals use Claude's official `--permission-prompt-tool` MCP interface. It supports visible Codex conversation inheritance, a private multi-image Windows clipboard queue, models and effort levels, all six native permission modes, per-tool runtime approvals, Claude Skills/plugins/hooks/MCP, and resumable sessions.
+Codex Claude Code Bridge is an unofficial open-source local plugin for Codex or ChatGPT Work. You can control both the Codex and Claude Code agent frameworks from the Codex App, calling Claude Code whenever you need it within the same workflow. With a compatible model provider configured in Claude Code, you can also use other models such as [DeepSeek](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/) and [GLM](https://docs.z.ai/devpack/tool/claude).
+
+Most importantly, the plugin passes the visible conversation context from your current Codex or ChatGPT Work task directly to Claude Code by default. This lets Claude Code reuse the requirements, plans, and progress already discussed for a seamless handoff. In a task with the plugin installed, its hooks trusted, and the project directory authorized, enter `claude run -- ...` when you reach your Codex or ChatGPT Work usage limit and need to switch to Claude Code. Claude Code can continue the work with the existing context, without having to reconstruct the background or copy and paste the conversation.
+
+Enter deterministic `claude` commands in a local Codex or ChatGPT Work task in the Codex App, or in Codex CLI. The hook intercepts the command before the host model starts and invokes the local Claude Code CLI, so continuing a task does not require the Codex or ChatGPT Work model to interpret or relay the request first. Runtime approvals use Claude's official `--permission-prompt-tool` MCP interface.
+
+The plugin supports visible Codex or ChatGPT Work conversation inheritance, a private multi-image Windows clipboard queue, Claude Code backend models and effort levels, all six native permission modes, per-tool runtime approvals, Claude Skills/plugins/hooks/MCP, and resumable sessions.
 
 The project is not affiliated with or endorsed by OpenAI or Anthropic. It does not bundle Claude Code, an account, a subscription, or an API key.
 
-> `claude ...` is the plugin hook command shared by Codex App and CLI. The App also accepts `/claude ...`; Codex CLI rejects unknown built-in slash commands before hooks run, so CLI users must omit `/`. Once the hook is installed and trusted, supported direct commands do not go through the Codex model.
+> `claude ...` is the plugin hook command shared by Codex App and CLI, not a built-in Codex or ChatGPT Work command. The App also accepts `/claude ...`; Codex CLI rejects unknown built-in slash commands before hooks run, so CLI users must omit `/`. Once the hook is installed and trusted, supported direct commands do not go through the Codex or ChatGPT Work model.
 
 ## Support scope
 
-The complete plugin supports Codex App and Codex CLI only. It depends on a `.codex-plugin` manifest, Codex `UserPromptSubmit`/`Interrupt`/`SessionEnd` hooks, task-scoped `PLUGIN_DATA`, `transcript_path`, and a Codex Skill, so another agent cannot install it as a feature-equivalent plugin.
+The complete plugin targets local Codex or ChatGPT Work desktop tasks with local plugin, hook, and transcript support, as well as Codex CLI. It depends on a `.codex-plugin` manifest, Codex `UserPromptSubmit`/`Interrupt`/`SessionEnd` hooks, task-scoped `PLUGIN_DATA`, `transcript_path`, and a Codex Skill, so another agent cannot install it as a feature-equivalent plugin. References to ChatGPT Work here mean desktop environments that provide these local capabilities; web and cloud-only tasks are outside the complete plugin's support scope. See the [OpenAI plugin documentation](https://learn.chatgpt.com/docs/plugins) for the host's plugin mechanism.
 
-Other agents with local stdio MCP support may manually configure the server in `.mcp.json` and reuse the four conservative tools: `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. That limited MCP reuse does not include deterministic `claude` commands, Codex conversation inheritance, task cleanup, the clipboard image queue, or native runtime approvals and is not a supported equivalent of the complete product.
+Other agents with local stdio MCP support may manually configure the server in `.mcp.json` and reuse the four conservative tools: `claude_code_health`, `claude_code_authorize_directory`, `claude_code_plan`, and `claude_code_run`. That limited MCP reuse does not include deterministic `claude` commands, Codex or ChatGPT Work conversation inheritance, task cleanup, the clipboard image queue, or native runtime approvals and is not a supported equivalent of the complete product.
 
 ## Quick start
 
@@ -30,13 +36,13 @@ claude allow a1b2c3d4 once
 
 The same background Claude process and tool call continue from the paused point. The task is not restarted.
 
-`plan`, `run`, `image run`, and `skill run` normally wait until Claude Code has a final result and return it once from the current hook. They no longer fall back to manual polling after a fixed 30-second window. The detached worker remains in place for real approvals, Codex interruption, hook timeouts, and safe cleanup after an unexpected App exit.
+`plan`, `run`, `image run`, and `skill run` normally wait until Claude Code has a final result and return it once from the current hook. They no longer fall back to manual polling after a fixed 30-second window. The detached worker remains in place for real approvals, Codex or ChatGPT Work task interruption, hook timeouts, and safe cleanup after an unexpected App exit.
 
-## Codex App
+## Codex App: Codex or ChatGPT Work
 
 1. Install and enable the plugin.
 2. Open **Settings → Hooks** and review the plugin's `UserPromptSubmit`, `Interrupt`, and `SessionEnd` hooks. Verify that the source is `codex-claude-code-bridge@personal` and that the command only starts this plugin's `scripts/command-hook.mjs`, then trust it.
-3. Fully quit and reopen the Codex App, then create a new task in the target project.
+3. Fully quit and reopen the Codex App, then create a new local Codex or ChatGPT Work task in the target project.
 4. Send `/claude status` or `claude status`. A hook-produced Claude status means interception is active.
 
 The App's plugin picker or `@` mention displays the plugin name above the composer. That is useful for the natural-language MCP/Skill fallback. Deterministic `claude ...` messages and the App's `/claude ...` alias do not need the plugin label on every request and do not require selecting the plugin first.
@@ -66,7 +72,7 @@ The bridge preserves Claude's native permission evaluation: hooks, deny rules, a
 | `dont-ask` | `dontAsk` | Anything not pre-approved is denied without prompting |
 | `bypass` | `bypassPermissions` | Bypasses ordinary permission prompts and exposes Claude's full tool surface |
 
-Global default, current-Codex-task override, and one-run override:
+Global default, current Codex or ChatGPT Work task override, and one-run override:
 
 ```text
 claude config set permission manual
@@ -99,9 +105,9 @@ claude answer <id> -- {"Which database?":"SQLite"}
 
 `session`, `project`, and `user` echo matching native permission suggestions supplied by Claude when available. `project` prefers local/project settings destinations. `AskUserQuestion` requests display question JSON and use `claude answer`.
 
-Normal tasks wait synchronously for the final result within `timeout-seconds`. A command returns before a terminal state only when Claude is waiting for a real tool approval or `AskUserQuestion`, the Codex/App turn is interrupted, or the worker still cannot write a terminal state during the hook's finalization grace period after Claude's timeout. After `allow`, `deny`, or `answer`, the bridge waits on the same Claude process until its final result or next approval.
+Normal tasks wait synchronously for the final result within `timeout-seconds`. A command returns before a terminal state only when Claude is waiting for a real tool approval or `AskUserQuestion`, the Codex or ChatGPT Work turn is interrupted, or the worker still cannot write a terminal state during the hook's finalization grace period after Claude's timeout. After `allow`, `deny`, or `answer`, the bridge waits on the same Claude process until its final result or next approval.
 
-The Codex stop action invokes the `Interrupt` hook and cancels the worker. These commands are primarily for recovery between approvals, after an unexpected hook/App exit, or for an explicit cancellation; they are no longer required for normal calls:
+The stop action in a local Codex or ChatGPT Work task invokes the `Interrupt` hook and cancels the worker. These commands are primarily for recovery between approvals, after an unexpected hook/App exit, or for an explicit cancellation; they are no longer required for normal calls:
 
 ```text
 claude status
@@ -109,11 +115,17 @@ claude result
 claude cancel <job-id>
 ```
 
-If duplicate hook instances receive the same Codex `turn_id` concurrently, the command executes once and the other instances exit silently, so one submission does not create duplicate results.
+If duplicate hook instances receive the same `turn_id` for a Codex or ChatGPT Work task concurrently, the command executes once and the other instances exit silently, so one submission does not create duplicate results.
 
-## Codex conversation inheritance
+## Codex or ChatGPT Work conversation inheritance
 
-`run`, `plan`, `image run`, and `skill run` read the hook's `transcript_path` by default, extract visible user messages and final Codex replies, and place the current task first. Raw tool logs, hidden reasoning, and credentials are not intentionally extracted.
+`run`, `plan`, `image run`, and `skill run` read the hook's `transcript_path` by default, extract visible user messages and assistant replies from the current Codex or ChatGPT Work task, and place the current request first for Claude Code. You can ask Claude Code to continue the unfinished work using that context:
+
+```text
+claude run -- Use the requirements, plans, and progress discussed above, inspect the current project state, and continue the unfinished work.
+```
+
+This deterministic command does not require a Codex or ChatGPT Work model call first, making it useful when you reach a usage limit. Inheritance covers visible conversation text from the transcript; long conversations retain the beginning and most recent content within the length limit. Raw tool logs, hidden reasoning, and credentials are not intentionally extracted.
 
 ```text
 claude config set conversation-context off
@@ -187,14 +199,14 @@ Successful calls retain the Claude session ID and can resume inside the same aut
 
 ## Deterministic and model-directed paths
 
-The deterministic hook path handles `claude` before Codex model inference, with `/claude` retained as an App alias. Codex's current hook response API cannot create a normal assistant bubble, so results appear as hook-block messages.
+The deterministic hook path handles `claude` before Codex or ChatGPT Work model inference, with `/claude` retained as an App alias. The current Codex hook response API cannot create a normal assistant bubble, so results appear as hook-block messages.
 
-A guarded MCP server and Codex Skill remain available when the user explicitly asks Codex to coordinate Claude. That MCP fallback keeps its separate directory capability and conservative tool surface; it is not the direct command path and does not automatically enable bypass.
+A guarded MCP server and Codex Skill remain available when the user explicitly asks Codex or ChatGPT Work to coordinate Claude Code. This path requires the host model; use the deterministic `claude` commands above when you reach the host's usage limit. The MCP fallback keeps its separate directory capability and conservative tool surface; it is not the direct command path and does not automatically enable bypass.
 
 ## Known boundaries and troubleshooting
 
 - Claude Code can occasionally return a successful envelope with an empty final `result`, especially when user or project customizations are loaded. Deterministic commands use `stream-json` and first recover the last non-empty main-session assistant text. If both the final envelope and assistant stream are empty, the bridge reports turn count, cost, loaded plugins, and stream event counts, and it does not retry automatically. For one low-cost isolation run, set `customizations` to `plugin-only` or `safe`, set a small `max-budget-usd`, and then inspect Claude hooks, plugins, and settings.
-- The inherited Codex conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
+- The inherited Codex or ChatGPT Work conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
 - `claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, use `claude doctor` to inspect endpoint and login status. The bridge respects Claude's environment and does not override a custom endpoint.
@@ -203,7 +215,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 
 Requirements:
 
-- Codex with local plugin and hook support;
+- a Codex or ChatGPT Work desktop environment with local plugin, hook, and transcript support, or Codex CLI;
 - Node.js 18 or newer;
 - Windows PowerShell 5.1+ for clipboard capture;
 - a locally installed and authenticated Claude Code CLI, verified with `2.1.258`;
@@ -218,7 +230,7 @@ node .\scripts\register-personal-marketplace.mjs
 codex plugin add codex-claude-code-bridge@personal
 ```
 
-Start a new Codex task after every install or update. Whenever Codex marks a hook `new or changed`, re-review it in **Settings → Hooks** in the App or with `/hooks` in Codex CLI. This release adds `Interrupt` and extends the `UserPromptSubmit` synchronous wait, so an updated installation must be reviewed again.
+Start a new local Codex or ChatGPT Work task after every install or update. Whenever the host marks a hook `new or changed`, re-review it in **Settings → Hooks** in the App or with `/hooks` in Codex CLI. This release adds `Interrupt` and extends the `UserPromptSubmit` synchronous wait, so an updated installation must be reviewed again.
 
 ## Security and data
 
@@ -236,7 +248,7 @@ npm install
 npm run check
 ```
 
-The project can be published as a normal public GitHub repository. It contains no user login credentials, clipboard images, runtime state, or project data. Each user must install Claude Code, Node.js, and Codex locally and trust the hook independently.
+The project can be published as a normal public GitHub repository. It contains no user login credentials, clipboard images, runtime state, or project data. Each user must install Claude Code, Node.js, and a Codex or ChatGPT Work environment with local plugin support, and trust the hook independently.
 
 The automated suite covers App/CLI command parsing, one-turn deduplication, synchronous completion, delayed jobs, timeout, interrupt cancellation, tool approvals, `AskUserQuestion`, empty-result recovery, customization isolation, conversation inheritance, image ordering, permission modes, MCP, and UTF-8 validation.
 
