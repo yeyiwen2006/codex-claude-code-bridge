@@ -401,7 +401,7 @@ export function buildClaudeArguments(input) {
       argumentsList.push("--fork-session");
     }
   }
-  if (!input.persistSession) {
+  if (!nativeSessionFilesEnabled(input)) {
     argumentsList.push("--no-session-persistence");
   }
   if (input.model) {
@@ -783,7 +783,10 @@ export async function runClaude(input, options = {}) {
     maxOutputBytes: options.maxOutputBytes,
     stdinText: promptWithImages(input),
   });
-  return normalizeClaudeResult(processResult);
+  return {
+    ...normalizeClaudeResult(processResult),
+    native_session_files: nativeSessionFilesEnabled(input),
+  };
 }
 
 export async function runClaudeNative(input, options = {}) {

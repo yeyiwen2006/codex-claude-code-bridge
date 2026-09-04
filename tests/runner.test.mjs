@@ -109,6 +109,7 @@ test("keeps hook transcript files while fresh calls still omit session resumptio
     const input = await makeInput({ customization_sources: customization, persist_session: false });
     const args = buildNativeClaudeArguments(input);
     assert.equal(args.includes("--no-session-persistence"), false);
+    assert.equal(buildClaudeArguments(input).includes("--no-session-persistence"), false);
     assert.equal(args.includes("--resume"), false);
     assert.equal(args.includes("--continue"), false);
   }
