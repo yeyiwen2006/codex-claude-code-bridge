@@ -117,17 +117,19 @@ async function atomicWriteJson(filePath, value) {
   }
   await writeFile(temporaryPath, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
   try {
-    await rename(temporaryPath, filePath);
-  } catch (error) {
-    if (error && typeof error === "object" && ["EEXIST", "EPERM"].includes(error.code)) {
-      await unlink(filePath).catch((unlinkError) => {
-        if (!(unlinkError && typeof unlinkError === "object" && unlinkError.code === "ENOENT")) {
-          throw unlinkError;
+    const deadline = Date.now() + 1_000;
+    while (true) {
+      try {
+        await rename(temporaryPath, filePath);
+        break;
+      } catch (error) {
+        // Windows readers can briefly prevent replacement. Keep the old file:
+        // deleting it first makes concurrent readers mistake the gap for cleanup.
+        if (!["EEXIST", "EPERM", "EBUSY"].includes(error?.code) || Date.now() >= deadline) {
+          throw error;
         }
-      });
-      await rename(temporaryPath, filePath);
-    } else {
-      throw error;
+        await delay(25);
+      }
     }
   } finally {
     await unlink(temporaryPath).catch(() => {});

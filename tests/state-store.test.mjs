@@ -1,9 +1,40 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import fsPromises, { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { withStateLock } from "../server/lib/state-store.mjs";
+import { loadCommandConfig, saveCommandConfig, withStateLock } from "../server/lib/state-store.mjs";
+
+test("keeps the previous state readable while retrying a busy file replacement", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-state-replace-"));
+  const originalRename = fsPromises.rename;
+  try {
+    for (const code of ["EPERM", "EEXIST", "EBUSY"]) {
+      await saveCommandConfig(dataRoot, { model: "opus" });
+      let attempts = 0;
+      fsPromises.rename = async (...args) => {
+        attempts += 1;
+        if (attempts === 1) throw Object.assign(new Error("Simulated busy destination"), { code });
+        assert.equal((await loadCommandConfig(dataRoot)).model, "opus", "readers must retain the old state until replacement succeeds");
+        return originalRename(...args);
+      };
+      syncBuiltinESMExports();
+      try {
+        await saveCommandConfig(dataRoot, { model: "sonnet" });
+        assert.equal(attempts, 2);
+        assert.equal((await loadCommandConfig(dataRoot)).model, "sonnet");
+      } finally {
+        fsPromises.rename = originalRename;
+        syncBuiltinESMExports();
+      }
+    }
+  } finally {
+    fsPromises.rename = originalRename;
+    syncBuiltinESMExports();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
 
 test("reclaims a lock immediately when its owner process no longer exists", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "codex-claude-code-bridge-lock-"));
