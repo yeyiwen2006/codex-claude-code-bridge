@@ -37,6 +37,16 @@ test("reset all recovers even malformed JSON and help remains available", async 
   assert.deepEqual(await loadCommandConfig(data), DEFAULT_COMMAND_CONFIG);
 });
 
+test("config accepts extended-context model names and rejects non-string stored models", async (t) => {
+  const { data, submit } = await fixture(t);
+  for (const model of ["opus[1m]", "sonnet[1m]"]) {
+    assert.match((await submit(`claude config set model ${model}`)).reason, /设置已更新/);
+    assert.equal((await loadCommandConfig(data)).model, model);
+  }
+  await saveCommandConfig(data, { ...DEFAULT_COMMAND_CONFIG, model: 42 });
+  assert.match((await submit("claude config show")).reason, /model 无效/);
+});
+
 test("rejects a twenty-first plugin without corrupting the saved configuration", async (t) => {
   const { root, data, submit } = await fixture(t);
   const directories = Array.from({ length: 21 }, (_, i) => path.join(root, `plugin-${i}`));

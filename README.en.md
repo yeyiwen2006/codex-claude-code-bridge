@@ -162,6 +162,7 @@ Images are delivered in queue order and removed after the consuming task complet
 ```text
 claude config show
 claude config set model opus
+claude config set model opus[1m]
 claude config set effort high
 claude config set permission manual
 claude config set customizations all
@@ -219,6 +220,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
 - `claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, run the native Claude CLI command `claude doctor` in a system terminal to inspect the installation (it is not a bridge chat command). The bridge respects Claude's environment and does not override a custom endpoint.
+- `plugin-only` does not load environment variables from Claude user settings. If the inherited `ANTHROPIC_BASE_URL` differs from the address in those settings, switching modes may cause a model 404. Ensure the environment launching Codex points to the intended service; the bridge does not copy user settings to override this isolation.
 
 ## Install
 

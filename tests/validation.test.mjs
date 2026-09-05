@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { buildNativeClaudeArguments } from "../server/lib/claude-runner.mjs";
 import {
   InputError,
   normalizeAuthorizationInput,
@@ -41,6 +42,20 @@ test("rejects relative working directories", async () => {
     normalizeRunInput({ prompt: "test", working_directory: "." }),
     (error) => error instanceof InputError && /absolute path/.test(error.message),
   );
+});
+
+test("preserves official extended-context model names in native arguments", async () => {
+  for (const model of ["opus[1m]", "sonnet[1m]", "claude-opus-4-8[1m]"]) {
+    const input = await normalizeRunInput({ prompt: "test", working_directory: temporaryDirectory, model });
+    const args = buildNativeClaudeArguments(input);
+    assert.equal(args[args.indexOf("--model") + 1], model);
+  }
+});
+
+test("rejects malformed model suffixes and model argument injection", async () => {
+  for (const model of ["opus[2m]", "opus[1m][1m]", "opus[1m] --help", "--help", "opus;echo", "opus\nsonnet", 42]) {
+    await assert.rejects(normalizeRunInput({ prompt: "test", working_directory: temporaryDirectory, model }), InputError);
+  }
 });
 
 test("accepts all native Claude permission modes, including bypass", async () => {

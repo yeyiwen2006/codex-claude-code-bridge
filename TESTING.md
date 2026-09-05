@@ -5,8 +5,8 @@
 ## 环境与方法
 
 - 本机 Windows，Node.js 24.19.0，Claude Code 2.1.259。
-- App 实际加载的 Codex 后端为 0.153.3。交互式 CLI 也使用这个版本完成帮助入口验证。
-- PATH 中另有 Codex CLI 0.145.0-alpha.18；其非交互测试出现模型元数据兼容警告。本次没有更改系统 PATH 或升级该可执行文件。
+- App 实际加载的 Codex 后端为 0.153.3。首轮使用这个版本完成帮助入口验证，补测使用更新后的独立 CLI 0.153.4。
+- 按用户的追加要求，将 npm 安装从 0.125.0 更新至官方稳定版 0.153.4；将 PATH 最前方的旧 0.145.0-alpha.18 可执行文件改名备份为 `codex.exe.pre-update-20260905.bak`，保留在原 `.codex/.sandbox-bin` 目录。没有更改 PATH 字符串；`codex` 现在解析到 npm 入口，版本和原有 ChatGPT 登录状态均已验证。App 与 VS Code 自带的可执行文件未被替换。
 - 自动化测试使用模拟 Claude 进程验证确定性行为；另外通过当前 App 的实际 MCP 工具、真实 Claude 进程、交互式 CLI 和原生 Windows 剪贴板完成独立实测。
 - 真实文件操作使用专用测试文件，配置与会话测试使用独立的临时插件数据目录。没有重置用户的插件配置，没有执行哈希检验。
 
@@ -23,12 +23,13 @@
 | 既有 macOS CI 的输出上限用例失败 | 模拟进程等待大段输出写完再退出，避免平台管道缓冲差异使输出被截断；补充 stderr 上限验证 |
 | Windows 并发回归中偶发锁文件 `EPERM`，锁交接时可能误删新锁 | 获取和检查锁时遇到删除尚未完成的临时错误，在原有等待上限内重试；锁消失时重试获取，不把它当作无主锁删除；补充三轮、每轮 12 个竞争持有者的互斥测试 |
 | Ubuntu CI 暴露 SessionEnd 清理与结果读取的竞争 | 在同一把锁内完成结束会话的清理；结果读取不会重建已经删除的会话状态；状态检查和读取共用已打开的文件，避免中途删除被误报为 JSON 损坏 |
+| 模型校验拒绝官方的 `opus[1m]`、`sonnet[1m]`，且持久化配置中的数字模型值会被隐式转换后接受 | 配置设置、配置读取和调用参数共用模型名称校验，支持可选 `[1m]` 后缀，限制字符串类型及 128 字符长度；增加回归测试并完成 `opus[1m]` 的真实读取调用 |
 
 标准输入控制协议参考 [Anthropic 官方 Agent SDK 实现](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py)。
 
 ## 自动化覆盖
 
-本机完整检查为 92 项测试全部通过，另包含清单结构、JavaScript 语法、UTF-8、BOM 和替换字符检查。运行方式：
+首轮 92 项测试通过；CLI 更新后的补测新增 3 项模型兼容性回归，完整检查为 95 项测试全部通过，另包含清单结构、JavaScript 语法、UTF-8、BOM 和替换字符检查。运行方式：
 
 ```powershell
 npm run check
@@ -54,21 +55,26 @@ GitHub CI 保留 Windows、Ubuntu、macOS × Node.js 18、20、22 的九项矩�
 | App MCP 健康检查 | 检测到 Claude Code 2.1.259，认证成功 |
 | App MCP 只读调用 | 返回 `BRIDGE_APP_MCP_OK 中文正常` |
 | App MCP 写入调用 | 实际生成文件，读取到 `APP_WRITE_OK 中文写入正常`；测试文件已清理 |
-| 交互式 CLI Hook | `claude help` 显示完整插件帮助 |
-| 非交互式 CLI | 0.153.3 的 `codex exec` 被 Hook 拦截，宿主模型输入和输出 token 均为零；该入口不显示完整 Hook 原因 |
+| 交互式 CLI Hook | 首轮 `claude help` 显示完整帮助；新版 0.153.4 实际显示 `claude status`、`claude result` 和 `claude session show` 的 Hook 返回结果 |
+| 非交互式 CLI | 0.153.3 和 0.153.4 的 `codex exec` 均被 Hook 拦截，宿主模型输入和输出 token 均为零；该入口仍不显示完整 Hook 原因 |
 | 原生会话续接 | 开启持久化，下一次调用成功复述前一次设置的测试标记，保持同一 Claude 会话 ID |
 | safe 模式真实审批 | 请求 Write 时显示工具参数和审批 ID；`allow once` 后在同一任务继续，实际写入 `BRIDGE_WRITE_OK 中文` |
 | 原生 plan | 通过 Read 读取测试文件并返回 `测试数据 BRIDGE_FIXTURE_20260905` |
 | Windows 多图文件剪贴板 | 一次捕获两张 PNG，与源文件逐字节比较一致，无哈希计算 |
 | Windows 位图剪贴板 | 捕获为 PNG，读取后尺寸为 2×2；原剪贴板内容已恢复 |
 | 更新安装 | 从 personal 市场重新安装带新缓存版本号的插件 |
+| `dont-ask` 与 `auto` | 独立测试会话中实际用 Read 读取固定文件，返回预期中文内容；这不代表覆盖所有自动分类决策 |
+| `accept-edits` 与 `bypass` | 分别实际用 Write 写入独立目录中的单个测试文件，内容验证为 `REMAINING_WRITE_OK 中文`；没有执行广泛文件操作 |
+| `plugin-only` 加载与 Skill 执行 | 显式添加专用本地测试插件后，列表发现 `bridge-smoke:echo`，Claude 元数据确认加载 `bridge-smoke`；解决测试进程的服务地址差异后，实际执行 Skill 并返回 `SKILL_LOADED_OK 中文` |
+| 扩展上下文模型名称 | `claude config set model opus[1m]` 成功保存，真实 Claude 调用读取文件并返回预期内容；没有通过大规模输入测试实际上下文容量 |
 
 ## 测试边界与外部错误
 
-- 没有使用自动点击完成 App 设置页、停止按钮、插件选择器或输入框粘贴的整套界面验收。App 的 MCP 实际调用、Hook 输入包装、Interrupt 事件及原生剪贴板分别进行了验证。
-- `plugin-only` 的一次真实调用遇到提供方 404。切换自定义项来源会影响 Claude 的设置加载；桥接器如实返回错误，本次没有改写用户的模型、端点或认证配置。
+- 没有完成 App 设置页、停止按钮、插件选择器或输入框粘贴的整套界面验收。补测时 Windows 界面工具可初始化，但将当前窗口识别为 `ChatGPT.exe`，其 Computer Use 技能操作规则禁止自动操作该应用界面；只检查了窗口，没有输入或点击。App 的 MCP 实际调用、Hook 输入包装、Interrupt 事件及原生剪贴板分别进行了验证。
+- `plugin-only` 首轮及补测曾返回模型 404。已定位到当前进程继承的 `ANTHROPIC_BASE_URL` 与 Claude 用户设置中的同名值不同：`plugin-only` 不加载用户设置，连接到了不同服务。仅在测试进程中显式采用已验证的 Claude 设置地址后，相同模型和 Skill 调用成功。没有输出地址或凭据，没有修改全局环境、认证或 Claude 设置；实际使用 `plugin-only` 时仍需确保其继承的服务配置正确。
 - 会话分叉生成了新会话 ID，但该次请求被 Claude 上游拒绝，因此未将“真实分叉后的回答成功”计为通过。没有为绕过拒绝而重试或切换模型。
-- `auto` 的账号策略、`bypass` 下的真实广泛文件操作、第三方插件服务以及所有 Claude Skills 没有逐一调用；对应的参数映射、隔离与命令路径使用自动化测试覆盖。
+- `auto` 的全部账号策略、`bypass` 下的广泛文件操作、第三方插件服务以及所有 Claude Skills 没有逐一调用；对应的参数映射、隔离与命令路径使用自动化测试覆盖，新增实测仅针对上述固定文件和专用测试插件。
+- 新版独立 CLI 启动仍有宿主级警告，包括共享配置中的 `remote_connections` 未知功能键、其他 Skill 的图标路径和 PowerShell 不支持 shell snapshot；本轮命令成功完成，没有擅自修改供 App 共用的配置来隐藏警告。
 - 真实调用使用 Claude 的原生费用限制；该限制可能在一个已开始的回合结束后才停止。测试中观察到一次设置为 0.15 美元的调用在 0.210714 美元处终止，与现有文档说明一致。
 
 本记录区分自动化模拟、真实调用和未覆盖界面，不能解释为所有第三方服务与账号配置均已验证。

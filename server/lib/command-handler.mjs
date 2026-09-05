@@ -59,6 +59,7 @@ import {
   CUSTOMIZATION_SOURCES,
   EFFORT_LEVELS,
   InputError,
+  isValidModelName,
   normalizeAuthorizationInput,
   normalizePluginDirectories,
   normalizeRunInput,
@@ -174,7 +175,7 @@ function onOff(value, key) {
 
 function validateConfig(config) {
   const candidate = { ...DEFAULT_COMMAND_CONFIG, ...config };
-  if (candidate.model !== null && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(candidate.model)) {
+  if (candidate.model !== null && !isValidModelName(candidate.model)) {
     throw new InputError("本地配置中的 model 无效；请执行 claude config reset model。");
   }
   if (candidate.effort !== null && !EFFORT_LEVELS.includes(candidate.effort)) {
@@ -241,10 +242,10 @@ function updateConfigValue(config, key, value) {
     case "model":
       if (value === "default") {
         updated.model = null;
-      } else if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) {
+      } else if (isValidModelName(value)) {
         updated.model = value;
       } else {
-        throw new CommandError("model 只能包含字母、数字、点、下划线、冒号和连字符。");
+        throw new CommandError("model 只能包含字母、数字、点、下划线、冒号和连字符，可带 [1m] 后缀，最长 128 字符。");
       }
       break;
     case "effort":

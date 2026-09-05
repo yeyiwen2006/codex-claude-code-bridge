@@ -57,6 +57,11 @@ export class InputError extends Error {
   }
 }
 
+export function isValidModelName(value) {
+  return typeof value === "string" && value.length <= 128
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*(?:\[1m\])?$/i.test(value);
+}
+
 function requirePlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new InputError("Tool arguments must be a JSON object.");
@@ -335,8 +340,8 @@ export async function normalizeRunInput(rawInput, options = {}) {
   }
 
   const model = readOptionalString(input, "model", 128);
-  if (model !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(model)) {
-    throw new InputError("'model' may contain only letters, numbers, dot, underscore, colon, and hyphen.");
+  if (model !== undefined && !isValidModelName(model)) {
+    throw new InputError("'model' may contain only letters, numbers, dot, underscore, colon, and hyphen, with an optional [1m] suffix.");
   }
 
   const customizationSources = readEnum(

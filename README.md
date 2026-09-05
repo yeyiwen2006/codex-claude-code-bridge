@@ -193,6 +193,7 @@ claude image clear
 ```text
 claude config show
 claude config set model opus
+claude config set model opus[1m]
 claude config set effort high
 claude config set permission manual
 claude config set customizations all
@@ -267,6 +268,7 @@ claude result
 - Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。Hook 信任可在 Codex App 的“设置”→“钩子”或交互式 Codex CLI 的 `/hooks` 中完成；排障时不要使用非交互 `codex exec`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
 - `claude status` 会显示当前进程是否设置了自定义 `ANTHROPIC_BASE_URL`，但不会泄露 URL。若认证显示正常而调用长期停在 `running`，可在系统终端运行 Claude CLI 的 `claude doctor` 检查安装状态（它不是聊天框中的桥接命令）；桥接器会尊重 Claude 环境，不会擅自改写自定义端点。
+- `plugin-only` 不加载 Claude 用户设置中的环境变量。如果进程继承的 `ANTHROPIC_BASE_URL` 与用户设置中的地址不同，切换模式可能导致模型 404；请确保启动 Codex 的环境指向预期服务。桥接器不会自动复制用户设置来覆盖这个隔离行为。
 
 配置损坏时，`claude help` 仍可用；可用 `claude config reset <键>` 修复单个设置，或用 `claude config reset all` 恢复默认值。取消、结果读取和审批也不会被无效配置阻断。最多可添加 20 个显式 Claude 插件路径，超限时保留原配置。
 
