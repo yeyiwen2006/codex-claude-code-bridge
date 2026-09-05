@@ -21,8 +21,8 @@
 | `safe` 模式禁用 MCP，遇到真实工具审批时 Claude 报回调不存在并退出 | 保留 `--safe-mode`，改用 Claude 官方双向标准输入控制协议，共用原来的逐工具审批与取消逻辑 |
 | Claude 提前退出且没有结果正文时，确定性命令遗漏 stderr | 返回最多 8,000 字符的 stderr 诊断 |
 | 既有 macOS CI 的输出上限用例失败 | 模拟进程等待大段输出写完再退出，避免平台管道缓冲差异使输出被截断；补充 stderr 上限验证 |
-| Windows 并发回归中偶发锁文件 `EPERM` | 对删除尚未完成时的临时错误，在原有等待上限内重试获取锁，不删除其他持有者的锁；补充 12 个竞争持有者的互斥测试 |
-| Ubuntu CI 暴露 SessionEnd 清理与结果读取的竞争 | 在同一把锁内完成结束会话的清理；结果读取不会重建已经删除的会话状态 |
+| Windows 并发回归中偶发锁文件 `EPERM`，锁交接时可能误删新锁 | 获取和检查锁时遇到删除尚未完成的临时错误，在原有等待上限内重试；锁消失时重试获取，不把它当作无主锁删除；补充三轮、每轮 12 个竞争持有者的互斥测试 |
+| Ubuntu CI 暴露 SessionEnd 清理与结果读取的竞争 | 在同一把锁内完成结束会话的清理；结果读取不会重建已经删除的会话状态；状态检查和读取共用已打开的文件，避免中途删除被误报为 JSON 损坏 |
 
 标准输入控制协议参考 [Anthropic 官方 Agent SDK 实现](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py)。
 
@@ -44,6 +44,8 @@ npm run check
 - MCP 协议、目录能力、服务端权限限制、进程输出上限和错误诊断。
 
 GitHub CI 保留 Windows、Ubuntu、macOS × Node.js 18、20、22 的九项矩阵。非 Windows 环境跳过仅适用于 Windows 的清单入口测试；其余测试照常执行。
+
+针对实际出现的锁竞争，修复后另外连续运行状态锁专项测试 10 次，全部通过，共覆盖 360 次竞争获取锁。
 
 ## 真实环境实测
 

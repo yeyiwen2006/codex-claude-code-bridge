@@ -45,14 +45,23 @@ test("serializes competing lock owners through repeated release and acquisition"
   try {
     let active = 0;
     let completed = 0;
-    await Promise.all(Array.from({ length: 12 }, () => withStateLock(dataRoot, "contended_lock", async () => {
-      active += 1;
-      assert.equal(active, 1, "lock owners must never overlap");
-      await new Promise((resolve) => setTimeout(resolve, 4));
-      completed += 1;
-      active -= 1;
-    })));
-    assert.equal(completed, 12);
+    for (let round = 0; round < 3; round += 1) {
+      const results = await Promise.allSettled(Array.from({ length: 12 }, () => withStateLock(dataRoot, "contended_lock", async () => {
+        active += 1;
+        try {
+          assert.equal(active, 1, "lock owners must never overlap");
+          await new Promise((resolve) => setTimeout(resolve, 4));
+          completed += 1;
+        } finally {
+          active -= 1;
+        }
+      })));
+      // Wait for every contender before cleaning up, including after a failure.
+      for (const result of results) {
+        if (result.status === "rejected") throw result.reason;
+      }
+    }
+    assert.equal(completed, 36);
   } finally {
     await rm(dataRoot, { recursive: true, force: true });
   }

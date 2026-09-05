@@ -78,23 +78,30 @@ async function ensureDataDirectories(dataRoot) {
 }
 
 async function readJsonFile(filePath, fallback) {
-  let details;
+  let handle;
   try {
-    details = await stat(filePath);
+    handle = await open(filePath, "r");
   } catch (error) {
     if (error && typeof error === "object" && error.code === "ENOENT") {
       return clone(fallback);
     }
     throw error;
   }
-  if (!details.isFile() || details.size > MAX_STATE_BYTES) {
-    throw new InputError(`Bridge state file is invalid: ${filePath}`);
-  }
   let parsed;
   try {
-    parsed = JSON.parse(await readFile(filePath, "utf8"));
-  } catch (error) {
-    throw new InputError(`Bridge state file cannot be parsed: ${error.message}`);
+    const details = await handle.stat();
+    if (!details.isFile() || details.size > MAX_STATE_BYTES) {
+      throw new InputError(`Bridge state file is invalid: ${filePath}`);
+    }
+    try {
+      // Keep the same file open across validation and reading. SessionEnd may
+      // remove the path in between, which is not a malformed state file.
+      parsed = JSON.parse(await handle.readFile("utf8"));
+    } catch (error) {
+      throw new InputError(`Bridge state file cannot be parsed: ${error.message}`);
+    }
+  } finally {
+    await handle.close();
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new InputError("Bridge state must contain a JSON object.");
@@ -135,10 +142,9 @@ async function lockOwnerIsRunning(lockPath) {
   let ownerText;
   try {
     ownerText = await readFile(lockPath, "utf8");
-  } catch (error) {
-    if (error && typeof error === "object" && error.code === "ENOENT") {
-      return false;
-    }
+  } catch {
+    // A disappearing lock means its owner released it. Treat that as a retry,
+    // not a dead owner: unlinking here could remove a new owner's lock.
     return true;
   }
   const ownerPid = Number(ownerText.trim());
@@ -189,6 +195,10 @@ async function acquireLock(dataRoot, name, options = {}) {
         }
       } catch (statError) {
         if (statError && typeof statError === "object" && statError.code === "ENOENT") {
+          continue;
+        }
+        if (process.platform === "win32" && statError?.code === "EPERM" && Date.now() < deadline) {
+          await delay(50);
           continue;
         }
         throw statError;
