@@ -22,6 +22,7 @@
 | Claude 提前退出且没有结果正文时，确定性命令遗漏 stderr | 返回最多 8,000 字符的 stderr 诊断 |
 | 既有 macOS CI 的输出上限用例失败 | 模拟进程等待大段输出写完再退出，避免平台管道缓冲差异使输出被截断；补充 stderr 上限验证 |
 | Windows 并发回归中偶发锁文件 `EPERM` | 对删除尚未完成时的临时错误，在原有等待上限内重试获取锁，不删除其他持有者的锁；补充 12 个竞争持有者的互斥测试 |
+| Ubuntu CI 暴露 SessionEnd 清理与结果读取的竞争 | 在同一把锁内完成结束会话的清理；结果读取不会重建已经删除的会话状态 |
 
 标准输入控制协议参考 [Anthropic 官方 Agent SDK 实现](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py)。
 

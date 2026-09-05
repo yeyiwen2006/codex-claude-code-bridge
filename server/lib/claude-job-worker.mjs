@@ -42,9 +42,10 @@ async function storeFinal(status, text, error, request) {
   await mkdir(resultDirectory, { recursive: true, mode: 0o700 });
   const resultPath = path.join(resultDirectory, `${jobId}.md`);
   await writeFile(resultPath, text, { encoding: "utf8", mode: 0o600, flag: "w" });
-  const sessionEnded = await mutateSession(async (state) => {
+  await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+    const state = await loadSessionState(dataRoot, sessionId);
     const job = state.activeJob;
-    if (!job || job.id !== jobId) return state.sessionEnded === true;
+    if (!job || job.id !== jobId) return;
     if (request.imageIds?.length > 0) {
       await clearQueuedImages(state, dataRoot, sessionId, request.imageIds);
     }
@@ -65,10 +66,9 @@ async function storeFinal(status, text, error, request) {
       status,
       text: request.responseText || text,
     });
-    return state.sessionEnded === true;
-  });
-  if (sessionEnded) {
-    await mutateSession(async (state) => {
+    if (state.sessionEnded) {
+      // Publish cleanup atomically instead of exposing a terminal job first:
+      // a result reader could otherwise recreate the state after SessionEnd.
       await clearQueuedImages(state, dataRoot, sessionId);
       for (const storedResult of state.resultFiles) {
         const resolved = path.resolve(storedResult);
@@ -76,11 +76,12 @@ async function storeFinal(status, text, error, request) {
           await unlink(resolved).catch(() => {});
         }
       }
-      state.resultFiles = [];
-    });
-    await removeSessionState(dataRoot, sessionId);
-    await rmdir(resultDirectory).catch(() => {});
-  }
+      await removeSessionState(dataRoot, sessionId);
+      await rmdir(resultDirectory).catch(() => {});
+    } else {
+      await saveSessionState(dataRoot, sessionId, state);
+    }
+  });
 }
 
 async function main() {

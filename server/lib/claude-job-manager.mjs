@@ -113,9 +113,11 @@ async function consumeCompletedJob(dataRoot, sessionId, job) {
   if (job.resultPath) {
     text = await readFile(job.resultPath, "utf8").catch(() => text);
   }
-  await mutateSession(dataRoot, sessionId, async (state) => {
-    if (state.activeJob?.id === job.id) {
+  await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+    const state = await loadSessionState(dataRoot, sessionId);
+    if (state.activeJob?.id === job.id && !state.sessionEnded) {
       state.activeJob = null;
+      await saveSessionState(dataRoot, sessionId, state);
     }
   });
   return text;
