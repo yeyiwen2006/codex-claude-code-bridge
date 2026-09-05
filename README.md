@@ -272,6 +272,8 @@ claude result
 
 配置损坏时，`claude help` 仍可用；可用 `claude config reset <键>` 修复单个设置，或用 `claude config reset all` 恢复默认值。取消、结果读取和审批也不会被无效配置阻断。最多可添加 20 个显式 Claude 插件路径，超限时保留原配置。
 
+确定性命令的文件操作报告依据 `Write`、`Edit`、`MultiEdit`、`NotebookEdit` 的调用及配对返回，区分成功、失败和未确认。若 Claude 的文字说明中，行内代码里的同名绝对路径与唯一成功工具目标不一致，完成正文显示工具记录，原始说明保留在诊断信息中。此记录不涵盖 Bash 等其他工具的全部文件副作用。
+
 ## 安装
 
 要求：

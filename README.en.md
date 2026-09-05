@@ -222,6 +222,8 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 - `claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, run the native Claude CLI command `claude doctor` in a system terminal to inspect the installation (it is not a bridge chat command). The bridge respects Claude's environment and does not override a custom endpoint.
 - `plugin-only` does not load environment variables from Claude user settings. If the inherited `ANTHROPIC_BASE_URL` differs from the address in those settings, switching modes may cause a model 404. Ensure the environment launching Codex points to the intended service; the bridge does not copy user settings to override this isolation.
 
+Deterministic commands report file operations from paired `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` calls and results, distinguishing success, failure, and missing results. If an absolute path in the model's inline-code summary conflicts with a unique successful tool target of the same filename, the completion body uses tool evidence and retains the original summary in diagnostics. This record does not enumerate all filesystem effects of Bash or other tools.
+
 ## Install
 
 Requirements:

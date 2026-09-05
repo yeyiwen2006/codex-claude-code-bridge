@@ -1,9 +1,12 @@
+import { fileOperationReport } from "./file-operation-report.mjs";
+
 function hasResultText(result) {
   return typeof result.result === "string" && result.result.trim().length > 0;
 }
 
 export function formatClaudeJobResult(result, request) {
   const emptyResult = !hasResultText(result);
+  const report = fileOperationReport(result);
   const metadata = {
     ok: result.ok,
     subtype: result.subtype ?? null,
@@ -31,6 +34,8 @@ export function formatClaudeJobResult(result, request) {
     plugin_errors: result.plugin_errors ?? [],
     hook_failures: result.hook_failures ?? [],
     recovery_includes_history: result.recovery_includes_history ?? false,
+    file_operations: result.file_operations ?? [],
+    ...(report.conflicts.length ? { reported_path_conflicts: report.conflicts, claude_original_result: result.result } : {}),
     native_session_files: result.native_session_files ?? null,
     permission_mode: request.input.permissionMode,
     customizations: request.input.customizationSources,
@@ -49,5 +54,8 @@ export function formatClaudeJobResult(result, request) {
   const hookNote = result.hook_failures?.length > 0
     ? "\n\n诊断：Claude 自定义 Hook 曾返回错误。若出现重复回复或反复寻找会话记录，请检查下方 hook_failures；桥接器未重新发送任务。"
     : "";
-  return `${primary}${hookNote}\n\n[Codex Claude Code Bridge 元数据]\n${JSON.stringify(metadata, null, 2)}`;
+  const body = report.prefix
+    ? report.conflicts.length ? report.prefix : `${report.prefix}\n\nClaude 文字说明：\n${primary}`
+    : primary;
+  return `${body}${hookNote}\n\n[Codex Claude Code Bridge 元数据]\n${JSON.stringify(metadata, null, 2)}`;
 }

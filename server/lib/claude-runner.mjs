@@ -538,7 +538,7 @@ function pluginName(entry) {
   return candidate?.slice(0, 200) ?? null;
 }
 
-function parseStreamJsonOutput(stdout) {
+export function parseStreamJsonOutput(stdout) {
   const lines = stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
   let finalRecord;
   let lastAssistantText = "";
@@ -549,6 +549,7 @@ function parseStreamJsonOutput(stdout) {
   const assistantTexts = [];
   const hookFailures = [];
   const eventCounts = {};
+  const fileCalls = new Map();
 
   for (const line of lines) {
     let record;
@@ -561,6 +562,22 @@ function parseStreamJsonOutput(stdout) {
     if (!isRecord(record)) continue;
     const key = `${typeof record.type === "string" ? record.type : "unknown"}/${typeof record.subtype === "string" ? record.subtype : "message"}`;
     eventCounts[key] = (eventCounts[key] ?? 0) + 1;
+    const blocks = Array.isArray(record.message?.content) ? record.message.content : [];
+    for (const block of blocks) {
+      const scope = record.parent_tool_use_id ?? "main";
+      if (record.type === "assistant" && block?.type === "tool_use"
+        && ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(block.name)
+        && typeof block.id === "string") {
+        const filePath = block.input?.file_path ?? block.input?.notebook_path;
+        if (typeof filePath === "string" && filePath.length > 0) {
+          const id = `${scope}:${block.id}`;
+          if (!fileCalls.has(id)) fileCalls.set(id, { tool: block.name, path: filePath, status: "unconfirmed" });
+        }
+      } else if (record.type === "user" && block?.type === "tool_result") {
+        const call = fileCalls.get(`${scope}:${block.tool_use_id}`);
+        if (call) call.status = block.is_error === true ? "failed" : "succeeded";
+      }
+    }
     const text = assistantText(record);
     if (record.type === "assistant" && !record.parent_tool_use_id) {
       assistantMessageCount += 1;
@@ -613,6 +630,7 @@ function parseStreamJsonOutput(stdout) {
     pluginErrors,
     assistantTexts,
     hookFailures,
+    fileOperations: [...fileCalls.values()],
   };
 }
 
@@ -722,6 +740,7 @@ function normalizeClaudeResult(processResult, options = {}) {
     normalized.plugin_errors = stream.pluginErrors;
     normalized.hook_failures = stream.hookFailures;
     normalized.recovery_includes_history = Boolean(recoveryIncludesHistory);
+    normalized.file_operations = stream.fileOperations;
   }
 
   if (typeof record.type === "string") {

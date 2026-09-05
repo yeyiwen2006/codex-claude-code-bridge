@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { runClaudeNative } from "./claude-runner.mjs";
 import { formatClaudeJobResult } from "./claude-result-text.mjs";
+import { fileOperationReport } from "./file-operation-report.mjs";
 import { recordBridgeExchange } from "./bridge-history.mjs";
 import { clearQueuedImages } from "./image-queue.mjs";
 import { requestPermission } from "./permission-prompt-server.mjs";
@@ -128,7 +129,11 @@ async function main() {
       } : {}),
     });
     request.resultSessionId = result.session_id;
-    request.responseText = result.result;
+    // Keep grounded file evidence in subsequent conversation handoffs too.
+    const report = fileOperationReport(result);
+    request.responseText = report.prefix
+      ? [report.prefix, ...(report.conflicts.length ? [] : [result.result ?? ""])].join("\n\n")
+      : result.result;
     await storeFinal(
       result.ok ? "completed" : "failed",
       formatClaudeJobResult(result, request),
