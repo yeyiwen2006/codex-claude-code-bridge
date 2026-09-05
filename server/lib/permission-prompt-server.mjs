@@ -2,6 +2,8 @@
 
 import { randomUUID } from "node:crypto";
 import readline from "node:readline";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
 import {
   loadSessionState,
   saveSessionState,
@@ -22,11 +24,11 @@ function validateIdentifier(value, label) {
   }
 }
 
-async function mutateSession(operation) {
-  return withStateLock(dataRoot, sessionLockName(sessionId), async () => {
-    const state = await loadSessionState(dataRoot, sessionId);
+async function mutateSession(context, operation) {
+  return withStateLock(context.dataRoot, sessionLockName(context.sessionId), async () => {
+    const state = await loadSessionState(context.dataRoot, context.sessionId);
     const result = await operation(state);
-    await saveSessionState(dataRoot, sessionId, state);
+    if (result !== false) await saveSessionState(context.dataRoot, context.sessionId, state);
     return result;
   });
 }
@@ -46,15 +48,18 @@ function permissionUpdates(scope, suggestions) {
   return (Array.isArray(suggestions) ? suggestions : []).filter((entry) => destinations.has(entry?.destination));
 }
 
-async function requestPermission(argumentsObject) {
+export async function requestPermission(argumentsObject, context, options = {}) {
+  const { dataRoot, sessionId, jobId } = context;
+  if (options.signal?.aborted) return { behavior: "deny", message: "权限请求已取消。" };
   const toolName = argumentsObject.tool_name;
   const input = argumentsObject.input;
   if (typeof toolName !== "string" || input === null || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("Permission prompt tool received invalid tool_name or input.");
   }
   const approvalId = randomUUID().replaceAll("-", "").slice(0, 8);
-  await mutateSession(async (state) => {
+  await mutateSession(context, async (state) => {
     if (state.activeJob?.id !== jobId) throw new Error("The active job changed while awaiting permission.");
+    if (state.activeJob.cancelRequested) throw new Error("The active job was cancelled.");
     state.activeJob.status = "waiting";
     state.activeJob.pendingApproval = {
       id: approvalId,
@@ -72,6 +77,18 @@ async function requestPermission(argumentsObject) {
   });
 
   while (true) {
+    if (options.signal?.aborted) {
+      await mutateSession(context, async (state) => {
+        if (state.activeJob?.id === jobId && state.activeJob.pendingApproval?.id === approvalId) {
+          state.activeJob.status = "running";
+          state.activeJob.pendingApproval = null;
+          state.activeJob.decision = null;
+        } else {
+          return false;
+        }
+      });
+      return { behavior: "deny", message: "权限请求已取消。" };
+    }
     const state = await loadSessionState(dataRoot, sessionId);
     const job = state.activeJob;
     if (!job || job.id !== jobId || job.cancelRequested) {
@@ -79,7 +96,7 @@ async function requestPermission(argumentsObject) {
     }
     if (job.decision?.approvalId === approvalId) {
       const decision = job.decision;
-      await mutateSession(async (mutable) => {
+      await mutateSession(context, async (mutable) => {
         if (mutable.activeJob?.id === jobId) {
           mutable.activeJob.status = "running";
           mutable.activeJob.pendingApproval = null;
@@ -143,26 +160,32 @@ async function handle(message) {
     }] });
   }
   if (message.method === "tools/call" && message.params?.name === TOOL_NAME) {
-    const decision = await requestPermission(message.params.arguments ?? {});
+    const decision = await requestPermission(message.params.arguments ?? {}, { dataRoot, sessionId, jobId });
     return response(message.id, { content: [{ type: "text", text: JSON.stringify(decision) }] });
   }
   return { jsonrpc: "2.0", id: message.id ?? null, error: { code: -32601, message: "Method not found" } };
 }
 
-validateIdentifier(sessionId, "Session ID");
-validateIdentifier(jobId, "Job ID");
-if (!dataRoot || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(dataRoot)) throw new Error("PLUGIN_DATA path must be absolute.");
+async function startPermissionServer() {
+  validateIdentifier(sessionId, "Session ID");
+  validateIdentifier(jobId, "Job ID");
+  if (!dataRoot || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(dataRoot)) throw new Error("PLUGIN_DATA path must be absolute.");
 
-const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-for await (const line of lines) {
-  if (!line.trim()) continue;
-  let outgoing;
-  let incoming;
-  try {
-    incoming = JSON.parse(line);
-    outgoing = await handle(incoming);
-  } catch (error) {
-    outgoing = errorResponse(incoming?.id ?? null, error);
+  const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    let outgoing;
+    let incoming;
+    try {
+      incoming = JSON.parse(line);
+      outgoing = await handle(incoming);
+    } catch (error) {
+      outgoing = errorResponse(incoming?.id ?? null, error);
+    }
+    if (outgoing) process.stdout.write(`${JSON.stringify(outgoing)}\n`);
   }
-  if (outgoing) process.stdout.write(`${JSON.stringify(outgoing)}\n`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  await startPermissionServer();
 }

@@ -63,3 +63,11 @@ test("marks text recovered from the assistant stream without calling it empty", 
   assert.match(text, /"result_recovered_from_stream": true/);
   assert.match(text, /"fixture-plugin"/);
 });
+
+test("includes bounded stderr diagnostics when Claude exits without a result", () => {
+  const text = formatClaudeJobResult({ ok: false, result: "", exit_code: 1,
+    stderr: `Error: permission callback not found.\n${"x".repeat(9000)}` }, request);
+  const metadata = JSON.parse(text.split("[Codex Claude Code Bridge 元数据]\n")[1]);
+  assert.match(metadata.stderr, /permission callback not found/);
+  assert.equal(metadata.stderr.length, 8000);
+});

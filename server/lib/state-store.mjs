@@ -172,6 +172,12 @@ async function acquireLock(dataRoot, name, options = {}) {
       await handle.writeFile(`${process.pid}\n`, "utf8");
       return { handle, lockPath };
     } catch (error) {
+      // Windows can report EPERM while another handle is finishing deletion of
+      // the lock. Retry acquisition within the same deadline without unlinking it.
+      if (process.platform === "win32" && error?.code === "EPERM" && Date.now() < deadline) {
+        await delay(50);
+        continue;
+      }
       if (!(error && typeof error === "object" && error.code === "EEXIST")) {
         throw error;
       }

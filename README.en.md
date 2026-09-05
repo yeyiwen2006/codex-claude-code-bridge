@@ -6,7 +6,7 @@ Codex Claude Code Bridge is an unofficial open-source local plugin for Codex or 
 
 Most importantly, the plugin passes the visible conversation context from your current Codex or ChatGPT Work task directly to Claude Code by default. This lets Claude Code reuse the requirements, plans, and progress already discussed for a seamless handoff. In a task with the plugin installed, its hooks trusted, and the project directory authorized, enter `claude run -- ...` when you reach your Codex or ChatGPT Work usage limit and need to switch to Claude Code. Claude Code can continue the work with the existing context, without having to reconstruct the background or copy and paste the conversation.
 
-Enter deterministic `claude` commands in a local Codex or ChatGPT Work task in the Codex App, or in Codex CLI. The hook intercepts the command before the host model starts and invokes the local Claude Code CLI, so continuing a task does not require the Codex or ChatGPT Work model to interpret or relay the request first. Runtime approvals use Claude's official `--permission-prompt-tool` MCP interface.
+Enter deterministic `claude` commands in a local Codex or ChatGPT Work task in the Codex App, or in Codex CLI. The hook intercepts the command before the host model starts and invokes the local Claude Code CLI, so continuing a task does not require the Codex or ChatGPT Work model to interpret or relay the request first. Runtime approvals use Claude's official `--permission-prompt-tool` interface. Safe mode uses the bidirectional stdio control protocol; other modes retain the MCP approval channel.
 
 The plugin supports visible Codex or ChatGPT Work conversation inheritance, a private multi-image Windows clipboard queue, Claude Code backend models and effort levels, all six native permission modes, per-tool runtime approvals, Claude Skills/plugins/hooks/MCP, and resumable sessions.
 
@@ -218,7 +218,7 @@ A guarded MCP server and Codex Skill remain available when the user explicitly a
 - The inherited Codex or ChatGPT Work conversation is supplied to Claude as user context. Claude may identify content in it as prompt injection and refuse the request. Use `claude config set conversation-context off` and retry with a self-contained prompt when appropriate.
 - Non-interactive `codex exec` can currently report only that a hook blocked the request without printing the complete hook reason. Review hook trust in **Settings → Hooks** in the Codex App or with `/hooks` in interactive Codex CLI; do not use non-interactive `codex exec` for troubleshooting.
 - Claude Code enforces `max-budget-usd` natively and may stop only after an already-started API turn finishes, so actual cost can slightly exceed the configured value. It is not a prepaid hard cutoff.
-- `claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, use `claude doctor` to inspect endpoint and login status. The bridge respects Claude's environment and does not override a custom endpoint.
+- `claude status` reports whether the current process has a custom `ANTHROPIC_BASE_URL` without exposing the URL. If authentication looks healthy but a call remains `running`, run the native Claude CLI command `claude doctor` in a system terminal to inspect the installation (it is not a bridge chat command). The bridge respects Claude's environment and does not override a custom endpoint.
 
 ## Install
 
@@ -227,7 +227,7 @@ Requirements:
 - a Codex or ChatGPT Work desktop environment with local plugin, hook, and transcript support, or Codex CLI;
 - Node.js 18 or newer;
 - Windows PowerShell 5.1+ for clipboard capture;
-- a locally installed and authenticated Claude Code CLI, verified with `2.1.258`;
+- a locally installed and authenticated Claude Code CLI, verified with `2.1.259`;
 - npm for project scripts; runtime code has no third-party npm dependency.
 
 ```powershell

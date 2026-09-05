@@ -39,3 +39,21 @@ test("waits for a lock owned by a running process instead of reclaiming it", asy
     await rm(dataRoot, { recursive: true, force: true });
   }
 });
+
+test("serializes competing lock owners through repeated release and acquisition", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-lock-contention-"));
+  try {
+    let active = 0;
+    let completed = 0;
+    await Promise.all(Array.from({ length: 12 }, () => withStateLock(dataRoot, "contended_lock", async () => {
+      active += 1;
+      assert.equal(active, 1, "lock owners must never overlap");
+      await new Promise((resolve) => setTimeout(resolve, 4));
+      completed += 1;
+      active -= 1;
+    })));
+    assert.equal(completed, 12);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});

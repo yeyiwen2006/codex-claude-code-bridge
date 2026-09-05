@@ -7,6 +7,7 @@ import { runClaudeNative } from "./claude-runner.mjs";
 import { formatClaudeJobResult } from "./claude-result-text.mjs";
 import { recordBridgeExchange } from "./bridge-history.mjs";
 import { clearQueuedImages } from "./image-queue.mjs";
+import { requestPermission } from "./permission-prompt-server.mjs";
 import {
   loadSessionState,
   removeSessionState,
@@ -121,6 +122,9 @@ async function main() {
       environment: process.env,
       permissionPromptToolName: PERMISSION_TOOL_NAME,
       mcpConfig,
+      ...(request.input.customizationSources === "safe" ? {
+        onPermission: (argumentsObject, options) => requestPermission(argumentsObject, { dataRoot, sessionId, jobId }, options),
+      } : {}),
     });
     request.resultSessionId = result.session_id;
     request.responseText = result.result;

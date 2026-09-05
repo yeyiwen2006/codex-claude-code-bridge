@@ -19,6 +19,7 @@ export function formatClaudeJobResult(result, request) {
     terminal_reason: result.terminal_reason ?? null,
     api_error_status: result.api_error_status ?? null,
     protocol_warning: result.protocol_warning ?? null,
+    ...(result.stderr ? { stderr: result.stderr.slice(0, 8000) } : {}),
     errors: result.errors ?? [],
     permission_denials: result.permission_denials ?? [],
     empty_result: emptyResult,

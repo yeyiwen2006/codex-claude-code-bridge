@@ -98,6 +98,19 @@ test("serves JSON-RPC over stdio and invokes the configured CLI", async (context
   });
   assert.equal(authorization.result.structuredContent.ok, true);
 
+  for (const permissionMode of ["bypassPermissions", "manual", "default", "plan"]) {
+    const rejected = await request({
+      jsonrpc: "2.0", id: `unsupported-${permissionMode}`, method: "tools/call",
+      params: { name: "claude_code_run", arguments: {
+        prompt: "must-not-run", working_directory: temporaryDirectory,
+        authorization_id: authorization.result.structuredContent.authorization_id,
+        permission_mode: permissionMode,
+      } },
+    });
+    assert.equal(rejected.result.isError, true, `MCP must reject ${permissionMode}`);
+    assert.equal(rejected.result.structuredContent.error_code, "INVALID_ARGUMENT");
+  }
+
   const run = await request({
     jsonrpc: "2.0",
     id: 4,

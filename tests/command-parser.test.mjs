@@ -140,3 +140,24 @@ test("validates normal and namespaced Claude skill names", () => {
   assert.equal(validateSkillName("reviewer:security-check"), "reviewer:security-check");
   assert.throws(() => validateSkillName("../escape"), CommandError);
 });
+
+test("preserves arbitrary prompt text after the unquoted separator in App and CLI", () => {
+  const prompt = `Don't change the user's files. Explain this unfinished quote: "\n中文和代码 \\ --flag`;
+  for (const prefix of ["claude", "/claude"]) {
+    for (const command of ["run", "plan", "image run", "skill run inspect", "image skill inspect"]) {
+      assert.equal(parseClaudeCommand(`${prefix} ${command} -- ${prompt}`).prompt, prompt);
+    }
+    assert.equal(parseClaudeCommand(`${prefix} deny a1b2c3d4 -- Don't delete it`).reason, "Don't delete it");
+    const answers = { Question: 'A literal " quote and a trailing backslash \\' };
+    assert.deepEqual(parseClaudeCommand(`${prefix} answer a1b2c3d4 -- ${JSON.stringify(answers)}`).answers, answers);
+  }
+});
+
+test("only an unquoted standalone double dash starts the prompt", () => {
+  assert.deepEqual(parseClaudeCommand('claude config set model "--"'), {
+    kind: "config-set", key: "model", value: "--",
+  });
+  assert.throws(() => parseClaudeCommand('claude run "--" ignored'), CommandError);
+  assert.throws(() => parseClaudeCommand('claude run --permission "broken -- text'), CommandError);
+  assert.equal(parseClaudeCommand('claude run --permission "plan" -- say "').prompt, 'say "');
+});

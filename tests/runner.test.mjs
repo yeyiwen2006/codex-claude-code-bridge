@@ -214,6 +214,12 @@ test("enforces the child output byte limit", async () => {
   );
 });
 
+test("enforces the child stderr byte limit", async () => {
+  await assert.rejects(runClaude(await makeInput({ prompt: "__BIG_STDERR__" }), {
+    commandConfiguration, maxOutputBytes: 64 * 1024,
+  }), (error) => error instanceof BridgeProcessError && error.code === "OUTPUT_LIMIT");
+});
+
 test("terminates an invocation at its configured timeout", async () => {
   await assert.rejects(
     runClaude(await makeInput({ prompt: "__HANG__", timeout_seconds: 1 }), { commandConfiguration }),

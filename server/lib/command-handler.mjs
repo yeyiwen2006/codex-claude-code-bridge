@@ -569,11 +569,33 @@ async function cleanupSession(dataRoot, sessionId) {
 }
 
 async function executeCommand(command, context) {
+  // Recovery commands must work even when the stored configuration is invalid.
+  if (command.kind === "help") return HELP_TEXT;
+  switch (command.kind) {
+    case "allow":
+    case "deny":
+    case "answer":
+      return context.dependencies.resolveClaudeApproval(command, context);
+    case "cancel":
+      return context.dependencies.cancelClaudeJob(command, context);
+    case "result":
+      return context.dependencies.readClaudeJobResult(context);
+  }
+  if (command.kind === "config-set" || command.kind === "config-reset") {
+    return withStateLock(context.dataRoot, "global_config", async () => {
+      const current = command.kind === "config-reset" && command.key === "all"
+        ? DEFAULT_COMMAND_CONFIG
+        : await loadCommandConfig(context.dataRoot);
+      const updated = command.kind === "config-set"
+        ? updateConfigValue(current, command.key, command.value)
+        : validateConfig(resetConfigValue(current, command.key));
+      await saveCommandConfig(context.dataRoot, updated);
+      return `设置已${command.kind === "config-set" ? "更新" : "重置"}。\n${configDisplay(updated)}`;
+    });
+  }
   const config = validateConfig(await loadCommandConfig(context.dataRoot));
 
   switch (command.kind) {
-    case "help":
-      return HELP_TEXT;
     case "status": {
       const [health, state, jobStatus] = await Promise.all([
         context.dependencies.getClaudeHealth({ environment: context.environment }),
@@ -598,20 +620,6 @@ async function executeCommand(command, context) {
     }
     case "config-show":
       return configDisplay(config);
-    case "config-set":
-      return withStateLock(context.dataRoot, "global_config", async () => {
-        const current = validateConfig(await loadCommandConfig(context.dataRoot));
-        const updated = updateConfigValue(current, command.key, command.value);
-        await saveCommandConfig(context.dataRoot, updated);
-        return `设置已更新。\n${configDisplay(updated)}`;
-      });
-    case "config-reset":
-      return withStateLock(context.dataRoot, "global_config", async () => {
-        const current = validateConfig(await loadCommandConfig(context.dataRoot));
-        const updated = validateConfig(resetConfigValue(current, command.key));
-        await saveCommandConfig(context.dataRoot, updated);
-        return `设置已重置。\n${configDisplay(updated)}`;
-      });
     case "mode":
       return mutateSession(context.dataRoot, context.sessionId, async (state) => {
         if (command.value === "default") {
@@ -689,14 +697,6 @@ async function executeCommand(command, context) {
     case "skill-run":
     case "image-skill":
       return stageOrRun(command, context, config);
-    case "allow":
-    case "deny":
-    case "answer":
-      return context.dependencies.resolveClaudeApproval(command, context);
-    case "cancel":
-      return context.dependencies.cancelClaudeJob(command, context);
-    case "result":
-      return context.dependencies.readClaudeJobResult(context);
     case "plugin-add": {
       const requested = path.resolve(context.cwd, command.value);
       const [normalized] = await normalizePluginDirectories([requested]);
@@ -704,6 +704,9 @@ async function executeCommand(command, context) {
         const current = validateConfig(await loadCommandConfig(context.dataRoot));
         if (current.pluginDirectories.some((entry) => pathsEqual(entry, normalized))) {
           return `该插件路径已经存在：${normalized}`;
+        }
+        if (current.pluginDirectories.length >= 20) {
+          throw new CommandError("最多可配置 20 个 Claude 插件路径；请先移除一个再添加。");
         }
         const updated = { ...current, pluginDirectories: [...current.pluginDirectories, normalized] };
         await saveCommandConfig(context.dataRoot, updated);

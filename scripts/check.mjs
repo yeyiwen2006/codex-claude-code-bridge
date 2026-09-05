@@ -52,6 +52,7 @@ assert.match(
 const sourceFiles = [
   "server/index.mjs",
   "server/lib/claude-runner.mjs",
+  "server/lib/claude-stdio-control.mjs",
   "server/lib/validation.mjs",
   "server/lib/command-parser.mjs",
   "server/lib/command-handler.mjs",

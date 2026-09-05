@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { attachClaudeStdioControl } from "./claude-stdio-control.mjs";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MIN_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -225,6 +226,7 @@ export function executeProcess(command, argumentsList, options = {}) {
     maxOutputBytes = configuredMaximumOutputBytes(environment),
     stdinText,
     inheritFullEnvironment = false,
+    interact,
   } = options;
 
   return new Promise((resolve, reject) => {
@@ -232,6 +234,7 @@ export function executeProcess(command, argumentsList, options = {}) {
     let settled = false;
     let terminalError;
     let timeout;
+    let stopInteraction;
     const stdoutChunks = [];
     const stderrChunks = [];
     let stdoutBytes = 0;
@@ -243,6 +246,7 @@ export function executeProcess(command, argumentsList, options = {}) {
         clearTimeout(timeout);
       }
       signal?.removeEventListener?.("abort", onAbort);
+      stopInteraction?.();
     };
 
     const failOnce = (error) => {
@@ -268,7 +272,7 @@ export function executeProcess(command, argumentsList, options = {}) {
         shell: false,
         windowsHide: true,
         detached: process.platform !== "win32",
-        stdio: [stdinText === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        stdio: [stdinText === undefined && !interact ? "ignore" : "pipe", "pipe", "pipe"],
       });
     } catch (error) {
       reject(new BridgeProcessError(`Unable to start Claude Code: ${error.message}`, "START_FAILED"));
@@ -284,11 +288,11 @@ export function executeProcess(command, argumentsList, options = {}) {
     timeout.unref?.();
     signal?.addEventListener?.("abort", onAbort, { once: true });
 
-    if (stdinText !== undefined) {
+    if (stdinText !== undefined || interact) {
       child.stdin.on("error", () => {
         // EPIPE is expected when the child exits before consuming all input.
       });
-      child.stdin.end(stdinText, "utf8");
+      if (!interact) child.stdin.end(stdinText, "utf8");
     }
 
     child.stdout.on("data", (chunk) => {
@@ -345,6 +349,9 @@ export function executeProcess(command, argumentsList, options = {}) {
         elapsedMs: Math.round(performance.now() - startedAt),
       });
     });
+    if (interact) {
+      try { stopInteraction = interact(child, failOnce); } catch (error) { failOnce(error); }
+    }
   });
 }
 
@@ -478,7 +485,9 @@ export function buildNativeClaudeArguments(input, options = {}) {
   if (input.model) argumentsList.push("--model", input.model);
   if (input.effort) argumentsList.push("--effort", input.effort);
   if (input.maxBudgetUsd !== undefined) argumentsList.push("--max-budget-usd", String(input.maxBudgetUsd));
-  if (options.permissionPromptToolName && options.mcpConfig) {
+  if (options.onPermission) {
+    argumentsList.push("--input-format", "stream-json", "--permission-prompt-tool", "stdio");
+  } else if (options.permissionPromptToolName && options.mcpConfig) {
     argumentsList.push("--mcp-config", JSON.stringify(options.mcpConfig));
     argumentsList.push("--permission-prompt-tool", options.permissionPromptToolName);
   }
@@ -804,6 +813,9 @@ export async function runClaudeNative(input, options = {}) {
     maxOutputBytes: options.maxOutputBytes,
     stdinText: promptWithImages(input),
     inheritFullEnvironment: true,
+    ...(options.onPermission ? {
+      interact: (child, fail) => attachClaudeStdioControl(child, promptWithImages(input), options.onPermission, fail),
+    } : {}),
   });
   return {
     ...normalizeClaudeResult(processResult, { streamJson: true }),

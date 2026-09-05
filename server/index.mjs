@@ -26,6 +26,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = new Set([
 ]);
 const AUTHORIZATION_TTL_MS = 4 * 60 * 60 * 1000;
 const MAX_CONCURRENT_CLAUDE_CALLS = 2;
+const MCP_RUN_PERMISSION_MODES = Object.freeze(["acceptEdits", "auto", "dontAsk"]);
 
 const COMMON_RUN_PROPERTIES = {
   prompt: {
@@ -177,7 +178,7 @@ export const TOOLS = Object.freeze([
         ...COMMON_RUN_PROPERTIES,
         permission_mode: {
           type: "string",
-          enum: ["acceptEdits", "auto", "dontAsk"],
+          enum: MCP_RUN_PERMISSION_MODES,
           default: "acceptEdits",
           description: "Claude permission mode for this MCP fallback's fixed file-only tool set. acceptEdits is the default; dontAsk pre-approves only listed file tools; auto uses Claude's classifier when supported.",
         },
@@ -419,6 +420,10 @@ async function invokeTool(name, rawArguments, signal) {
   if (name === "claude_code_run") {
     const authorization = authorizationFor(rawArguments?.authorization_id);
     const { authorization_id: _authorizationId, ...runArguments } = rawArguments ?? {};
+    if (runArguments.permission_mode !== undefined
+      && !MCP_RUN_PERMISSION_MODES.includes(runArguments.permission_mode)) {
+      throw new InputError(`MCP permission_mode must be one of: ${MCP_RUN_PERMISSION_MODES.join(", ")}.`);
+    }
     const input = await normalizeRunInput(runArguments);
     return executeAuthorizedClaude(input, authorization.root, true, signal);
   }

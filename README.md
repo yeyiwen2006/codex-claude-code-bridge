@@ -6,7 +6,7 @@ Codex Claude Code Bridge 是一个面向 Codex 或 ChatGPT Work 的非官方、�
 
 更重要的是，插件默认会将当前 Codex 或 ChatGPT Work 任务中可见的对话上下文直接传递给 Claude Code，让你复用已经讨论的需求、方案和任务进度，实现无缝切换。在插件已安装、Hook 已信任、项目目录已授权的任务中，当 Codex 或 ChatGPT Work 额度不足、需要转用 Claude Code 时，只需输入 `claude run -- ...`，就可以让 Claude Code 复用原有上下文，在现有工作流中继续任务，无需重新整理背景或复制粘贴整段对话。
 
-你可以在 Codex App 的 Codex 或 ChatGPT Work 本地任务中，以及 Codex CLI 的聊天框中直接输入确定性 `claude` 命令。Hook 会在宿主模型启动前拦截命令，再调用本机 Claude Code CLI，因此接续任务不需要先由 Codex 或 ChatGPT Work 的模型理解或转述请求。运行时审批使用 Claude 官方的 `--permission-prompt-tool` MCP 接口。
+你可以在 Codex App 的 Codex 或 ChatGPT Work 本地任务中，以及 Codex CLI 的聊天框中直接输入确定性 `claude` 命令。Hook 会在宿主模型启动前拦截命令，再调用本机 Claude Code CLI，因此接续任务不需要先由 Codex 或 ChatGPT Work 的模型理解或转述请求。运行时审批使用 Claude 官方的 `--permission-prompt-tool` 接口。`safe` 模式通过标准输入控制协议传递审批，其余模式保留 MCP 审批通道。
 
 它支持当前 Codex 或 ChatGPT Work 对话继承、多张剪贴板原图、Claude Code 后端模型与推理力度、六种原生权限模式、运行时逐工具审批、Claude Skills、插件、Hooks 与 MCP，以及 Claude 会话恢复。
 
@@ -266,7 +266,9 @@ claude result
 - 继承的 Codex 或 ChatGPT Work 对话会作为用户提供的上下文交给 Claude。Claude 自身可能把其中内容判定为提示词注入并拒绝执行；需要时可执行 `claude config set conversation-context off`，再用独立、明确的提示词重试。
 - Codex CLI 的非交互 `codex exec` 目前可能只显示 Hook 已阻止请求，而不显示 Hook 返回的完整原因。Hook 信任可在 Codex App 的“设置”→“钩子”或交互式 Codex CLI 的 `/hooks` 中完成；排障时不要使用非交互 `codex exec`。
 - `max-budget-usd` 由 Claude Code 原生执行，可能在一个已经开始的 API 回合结束后才停止，因此总费用可能小幅超过所设上限；它不是预付费硬闸门。
-- `claude status` 会显示当前进程是否设置了自定义 `ANTHROPIC_BASE_URL`，但不会泄露 URL。若认证显示正常而调用长期停在 `running`，可运行 `claude doctor` 检查端点与登录状态；桥接器会尊重 Claude 环境，不会擅自改写自定义端点。
+- `claude status` 会显示当前进程是否设置了自定义 `ANTHROPIC_BASE_URL`，但不会泄露 URL。若认证显示正常而调用长期停在 `running`，可在系统终端运行 Claude CLI 的 `claude doctor` 检查安装状态（它不是聊天框中的桥接命令）；桥接器会尊重 Claude 环境，不会擅自改写自定义端点。
+
+配置损坏时，`claude help` 仍可用；可用 `claude config reset <键>` 修复单个设置，或用 `claude config reset all` 恢复默认值。取消、结果读取和审批也不会被无效配置阻断。最多可添加 20 个显式 Claude 插件路径，超限时保留原配置。
 
 ## 安装
 
@@ -275,7 +277,7 @@ claude result
 - 支持本地插件、Hooks 和会话记录的 Codex 或 ChatGPT Work 桌面环境，或 Codex CLI；
 - Node.js 18 或更高版本；
 - Windows PowerShell 5.1 或更高版本用于剪贴板图片捕获；
-- 本机 Claude Code CLI 已安装且完成登录；当前验证版本为 `2.1.258`；
+- 本机 Claude Code CLI 已安装且完成登录；当前验证版本为 `2.1.259`；
 - npm 用于运行项目脚本；插件运行时代码本身不依赖第三方 npm 包。
 
 从源码：

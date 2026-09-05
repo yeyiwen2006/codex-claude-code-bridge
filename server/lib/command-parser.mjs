@@ -75,7 +75,7 @@ function tokenizeWithPositions(text) {
 
   const finish = (end) => {
     if (start >= 0) {
-      tokens.push({ value, start, end });
+      tokens.push({ value, start, end, separator: text.slice(start, end) === "--" });
       value = "";
       start = -1;
     }
@@ -99,6 +99,8 @@ function tokenizeWithPositions(text) {
 
     if (/\s/.test(character)) {
       finish(index);
+      // Everything after a literal separator is user text, not command syntax.
+      if (tokens.at(-1)?.separator) return tokens;
       continue;
     }
     if (start < 0) {
@@ -120,7 +122,7 @@ function tokenizeWithPositions(text) {
 
 function parseBody(body) {
   const tokenRecords = tokenizeWithPositions(body);
-  const separatorIndex = tokenRecords.findIndex((token) => token.value === "--");
+  const separatorIndex = tokenRecords.findIndex((token) => token.separator);
   if (separatorIndex < 0) {
     return { tokens: tokenRecords.map((token) => token.value), prompt: undefined };
   }

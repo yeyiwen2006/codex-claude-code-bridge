@@ -14,7 +14,7 @@ Codex Claude Code Bridge runs locally under the current operating-system user. I
 
 There are two distinct execution paths:
 
-- Deterministic `claude` hook commands, plus the Codex App-only `/claude` alias, use the local Claude Code CLI and its official `--permission-prompt-tool` MCP interface. Their permissions follow Claude's native modes and runtime permission flow.
+- Deterministic `claude` hook commands, plus the Codex App-only `/claude` alias, use the local Claude Code CLI and its official `--permission-prompt-tool` interface. Safe mode uses the bidirectional stdio control protocol because Claude disables MCP in that mode; other customization modes use the MCP permission server. Both transports use the same approval decisions and native permission flow.
 - The optional model-directed Codex MCP fallback retains its own temporary directory capability and conservative tool list. It does not silently inherit direct-command bypass behavior.
 
 `claude access allow <directory>` confirms the launch root, binds resumable Claude sessions to that root, and prevents accidental execution in a different Codex project. It does not stop Bash, plugins, MCP servers, or other tools from reaching paths that the current user can access when Claude's own permission flow allows them.
@@ -30,7 +30,7 @@ The deterministic path supports all current Claude modes:
 - `dont-ask` maps to `dontAsk` and denies unresolved prompts.
 - `bypass` maps to `bypassPermissions` with Claude's required explicit dangerous-mode acknowledgement.
 
-The bridge does not add an entire-task approval before Claude starts. A detached worker keeps the same Claude process alive while a specific tool request waits in the permission-prompt MCP server. `claude allow` or `claude deny` resolves that request, and execution resumes from the same tool call.
+The bridge does not add an entire-task approval before Claude starts. A detached worker keeps the same Claude process alive while a specific tool request waits in the permission handler. `claude allow` or `claude deny` resolves that request, and execution resumes from the same tool call. Stdio control requests are serialized; cancellation does not grant permission or start a replacement task.
 
 Claude evaluates hooks, managed settings, deny rules, ask rules, its permission mode, allow rules, and residual safeguards. The bridge does not circumvent organization policy or Claude errors.
 
@@ -103,7 +103,7 @@ At minimum, prompts and relevant context are sent to the configured Claude provi
 Changes should preserve these properties:
 
 - deterministic commands remain intercepted before the Codex model;
-- runtime approval resolves the current permission-prompt MCP request instead of restarting the task;
+- runtime approval resolves the current stdio or MCP permission request instead of restarting the task;
 - bypass remains an explicit mode and is never silently selected by the MCP fallback;
 - no organization or Claude policy error is circumvented;
 - subprocesses use fixed executables, argument arrays, and `shell: false`;

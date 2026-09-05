@@ -69,8 +69,12 @@ if (prompt === "__CLAUDE_ERROR__") {
     session_id: "11111111-2222-4333-8444-555555555555",
     permission_denials: [],
   };
-} else if (prompt === "__BIG__") {
-  process.stdout.write("x".repeat(128 * 1024));
+} else if (prompt === "__BIG__" || prompt === "__BIG_STDERR__") {
+  // A forced exit can discard pipe buffers on macOS before the limit is reached.
+  const output = prompt === "__BIG_STDERR__" ? process.stderr : process.stdout;
+  await new Promise((resolve, reject) => {
+    output.write("x".repeat(128 * 1024), (error) => error ? reject(error) : resolve());
+  });
   process.exit(0);
 } else {
   const resumeIndex = argumentsList.indexOf("--resume");
