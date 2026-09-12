@@ -75,6 +75,14 @@ GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12
 
 真实测试开始时，原模型服务返回 HTTP 402 欠费错误。按用户要求切换 DeepSeek 后，上述读写、审批、Skill 和会话测试通过。服务配置遵循 [DeepSeek 官方 Claude Code 说明](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/)。个人配置与凭据保存在仓库外，原配置已备份，没有写入测试夹具或提交。
 
+## macOS 与 Ubuntu 最终补测
+
+[Ubuntu 的真实任务](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34689877406)及 [macOS 的最终真实任务](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34690113014)各通过 13 项检查，覆盖独立安装、三个 Hook 加载、授权、读取未知随机标记并写入中文文件、手动批准与拒绝、工具启动后的真实中断、再次调用、退出清理和卸载。两端退出前均存在 17 个实际 `.done` 回执，退出后会话、结果、任务、图片及真实回执目录均清空；宿主模型请求、token 事件和生成内容条目均为零。
+
+macOS 在前一次运行中有一次读写断言失败，旧摘要不足以确定原因，未将它归因为服务超时或已确认的换行问题。补充诊断后，测试仍要求完整复制未提示的随机标记和中文，仅容许 CRLF/LF 与一个末尾换行的格式差异。最终 macOS 运行的预期和实际 UTF-8 长度均为 63 字节，原始内容完全一致，并有真实 Write 成功记录，该次通过没有依赖换行容忍。QA 修正未改变生产实现，Ubuntu 已通过的真实调用未重复执行。[随后 12 个自动化组合也全部通过](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34690107453)。
+
+远程测试使用经授权的临时加密 Secret，凭据内容未直接展示或写入代码、原始日志附件及测试摘要。最终测试完成后已删除 `BRIDGE_RELEASE_DEEPSEEK_API_KEY`，并确认仓库 Secret 列表为空。本地已重新安装包含最终锁修复的 0.3.6 缓存版本。
+
 ## 故障与并发补测
 
 故障注入启动真实 Claude Code，但将模型服务设为本机脚本化的 Anthropic 兼容端点，仅使用固定的无效测试凭据。持续断连、HTTP 429、HTTP 503 和无响应分别在任务期限后失败，活动任务与输入清理完成；每种故障后，同一会话均能完成健康调用。一次 429 后恢复的案例在第二次请求成功。另完成 10 个并发真实 Claude 进程以及 30 轮顺序调用，结果均成功。这些结果验证进程和协议处理，没有制造真实云端故障，也不代表数小时稳定性测试。
