@@ -25,6 +25,10 @@ Write-FixtureStage ("script-start pid=" + $PID)
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Write-FixtureStage "utf8-ready"
+Write-FixtureStage "utility-import-start"
+$utilityModule = [System.IO.Path]::Combine($PSHOME, "Modules", "Microsoft.PowerShell.Utility", "Microsoft.PowerShell.Utility.psd1")
+Import-Module -Name $utilityModule -ErrorAction Stop
+Write-FixtureStage "utility-imported"
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($HelperPath, [ref]$null, [ref]$null)
 Write-FixtureStage "helper-parsed"
 # Load function declarations only; never run clipboard reads or native setup.
@@ -34,7 +38,7 @@ foreach ($definition in $definitions) {
   . ([scriptblock]::Create($definition.Extent.Text))
 }
 Write-FixtureStage "functions-loaded"
-$fixtureText = Get-Content -LiteralPath $FixturePath -Raw -Encoding UTF8
+$fixtureText = [System.IO.File]::ReadAllText($FixturePath, [System.Text.Encoding]::UTF8)
 Write-FixtureStage "fixture-read"
 $fixture = $fixtureText | ConvertFrom-Json
 Write-FixtureStage "fixture-parsed"

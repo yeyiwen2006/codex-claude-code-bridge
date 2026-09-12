@@ -11,6 +11,11 @@ if (-not [System.IO.Path]::IsPathRooted($Destination)) {
   throw "Destination must be an absolute path."
 }
 
+# Load the built-in commands directly instead of discovering modules across
+# user and machine locations in the bridge's restricted child environment.
+$utilityModule = [System.IO.Path]::Combine($PSHOME, "Modules", "Microsoft.PowerShell.Utility", "Microsoft.PowerShell.Utility.psd1")
+Import-Module -Name $utilityModule -ErrorAction Stop
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @"
