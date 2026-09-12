@@ -18,7 +18,7 @@ node scripts/qa/cross-platform-host.mjs --setup-only
 node scripts/qa/cross-platform-host.mjs
 ```
 
-跨平台脚本覆盖独立安装、注册、实际调用、中断、恢复和卸载，可用 `BRIDGE_QA_CODEX_BIN` 指定宿主；Claude 使用生产入口的命令解析规则。此脚本要求固定版本 Codex 0.153.4 和 Claude Code 2.1.261，`--setup-only` 也会检查版本。GitHub 的 `Release host validation` 工作流手动运行 Ubuntu 与 macOS 两个任务，认证由仓库的 `BRIDGE_RELEASE_DEEPSEEK_API_KEY` Secret 提供。发布验证的临时 Secret 在测试结束后删除，之后再次运行需要先配置。工作流只上传经过筛选的 JSON 结论，不上传个人配置或模型原始输出。
+跨平台脚本覆盖独立安装、注册、实际调用、中断、恢复和卸载，可用 `BRIDGE_QA_CODEX_BIN` 指定宿主；Claude 使用生产入口的命令解析规则。此脚本要求固定版本 Codex 0.153.4 和 Claude Code 2.1.261，`--setup-only` 也会检查版本。GitHub 的 `Release host validation` 工作流默认手动运行 Ubuntu 与 macOS，也可用 `platform` 选项只验证其中一端，认证由仓库的 `BRIDGE_RELEASE_DEEPSEEK_API_KEY` Secret 提供。发布验证的临时 Secret 在测试结束后删除，之后再次运行需要先配置。工作流只上传经过筛选的 JSON 结论，不上传个人配置或模型原始输出。
 
 ## 可控故障
 

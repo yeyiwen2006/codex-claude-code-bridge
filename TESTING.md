@@ -12,7 +12,7 @@
 npm run check
 ```
 
-GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12 个组合。非 Windows 环境跳过 Windows 清单入口和原生剪贴板助手的两项测试，其余照常运行。最终代码及夹具修复后的 [12 个组合均通过](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34683107791)，后续文档提交的运行结果见 [GitHub CI](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/workflows/ci.yml)。
+GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12 个组合。非 Windows 环境跳过 Windows 清单入口和原生剪贴板助手的两项测试，其余照常运行。包含最终锁修复的 [12 个组合均通过](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34689874507)，后续文档与 QA 提交的运行结果见 [GitHub CI](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/workflows/ci.yml)。
 
 首轮 CI 暴露了 macOS 目录别名导致注册位置误判的问题，注册脚本已改为比较真实目录，并补充目录别名回归。Windows 新增路径测试也改为统一长短文件名后比较。新增任务恢复夹具后来也因未保存规范路径而失败，现已与生产授权和图片入口保持一致，并在 Windows junction 别名目录中通过定向测试。剪贴板测试在云端曾超时，增加阶段日志后确认 PowerShell 已进入脚本，阻塞发生在夹具读取所触发的模块加载环节；后续修复直接读取夹具，并明确加载系统自带模块，避免自动搜索其他模块目录。生产捕获超时未调整。
 

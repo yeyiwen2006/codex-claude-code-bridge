@@ -253,8 +253,23 @@ try {
     stage = "real-read-write";
     const sourceText = `HOST_READ_WRITE_OK 中文 ${randomUUID()}\n`;
     await writeFile(path.join(project, "source.txt"), sourceText, "utf8");
+    report.readWrite = { commandCompleted: false };
     const readWriteFeedback = await runTurn("claude run -- Use the Read tool to read source.txt in the current directory, then use the Write tool to create accepted.txt containing exactly the same complete text. Do not use any other tools. Reply COPY_DONE only after both tools succeed.");
-    assert.equal(await readFile(path.join(project, "accepted.txt"), "utf8"), sourceText);
+    report.readWrite.commandCompleted = true;
+    report.readWrite.outputFilePresent = await exists(path.join(project, "accepted.txt"));
+    const outputText = await readFile(path.join(project, "accepted.txt"), "utf8");
+    // Claude controls text formatting. A platform line ending or one optional
+    // final newline is immaterial; every character of the undisclosed nonce,
+    // Chinese text, and prefix must still be copied exactly.
+    const normalizeCopyText = (value) => value.replace(/\r\n/g, "\n").replace(/\n$/, "");
+    Object.assign(report.readWrite, {
+      exactBytesMatch: outputText === sourceText,
+      normalizedTextMatch: normalizeCopyText(outputText) === normalizeCopyText(sourceText),
+      expectedUtf8Bytes: Buffer.byteLength(sourceText, "utf8"),
+      actualUtf8Bytes: Buffer.byteLength(outputText, "utf8"),
+      successfulWriteReported: /Write · 工具返回成功/.test(readWriteFeedback),
+    });
+    assert.equal(normalizeCopyText(outputText), normalizeCopyText(sourceText));
     assert.match(readWriteFeedback, /Write · 工具返回成功/);
     check("real-claude-read-and-accept-edits-utf8-write", { capturedSuccessfulWrite: true, exactUnpromptedNonceAndUtf8: true });
 
@@ -405,11 +420,12 @@ try {
   };
   if (!report.success) {
     const feedback = events.filter((event) => event.method === "hook/completed")
-      .flatMap((event) => event.params.run.entries.map((entry) => entry.text)).join("\n");
+      .filter((event) => event.params.run.eventName === "userPromptSubmit")
+      .at(-1)?.params.run.entries.map((entry) => entry.text).join("\n") ?? "";
     report.failureSignals = {
       authentication: /authentication|unauthorized|invalid.{0,15}(?:key|token)|401/i.test(feedback),
       rateLimit: /rate.{0,5}limit|429/i.test(feedback),
-      timeout: /timed? out|timeout|超时/i.test(feedback),
+      timeout: /timed?\s*out|timeout\s+(?:exceeded|expired)|exceeded.{0,40}timeout|\d+-second timeout|超时/i.test(feedback),
       missingExecutable: /ENOENT|executable.{0,20}(?:missing|not found)/i.test(feedback),
       network: /ECONN|ENOTFOUND|connection.{0,12}(?:failed|refused)|network error/i.test(feedback),
     };
