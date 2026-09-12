@@ -17,22 +17,41 @@ test("clipboard file-drop helper preserves bytes and rejects excessive batches b
     await rm(root, { recursive: true, force: true });
   });
   const runner = path.join(root, "test-file-drop.ps1");
-  await writeFile(runner, `param([string]$HelperPath, [string]$FixturePath)
+  await writeFile(runner, `param([string]$HelperPath, [string]$FixturePath, [string]$ProgressPath)
+function Write-FixtureStage([string]$Stage) {
+  [System.IO.File]::AppendAllText($ProgressPath, ([DateTime]::UtcNow.ToString("O") + " " + $Stage + [Environment]::NewLine))
+}
+Write-FixtureStage ("script-start pid=" + $PID)
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Write-FixtureStage "utf8-ready"
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($HelperPath, [ref]$null, [ref]$null)
+Write-FixtureStage "helper-parsed"
 # Load function declarations only; never run clipboard reads or native setup.
 $definitions = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
-foreach ($definition in $definitions) { . ([scriptblock]::Create($definition.Extent.Text)) }
-$fixture = Get-Content -LiteralPath $FixturePath -Raw -Encoding UTF8 | ConvertFrom-Json
+foreach ($definition in $definitions) {
+  Write-FixtureStage ("loading-function " + $definition.Name)
+  . ([scriptblock]::Create($definition.Extent.Text))
+}
+Write-FixtureStage "functions-loaded"
+$fixtureText = Get-Content -LiteralPath $FixturePath -Raw -Encoding UTF8
+Write-FixtureStage "fixture-read"
+$fixture = $fixtureText | ConvertFrom-Json
+Write-FixtureStage "fixture-parsed"
 $Destination = $fixture.destination
 $supportedExtensions = @(".png")
 try {
+  Write-FixtureStage "copy-start"
   $items = Copy-ClipboardFileDrop $fixture.sources
-  @{ count = $items.Count; items = $items } | ConvertTo-Json -Depth 5 -Compress
+  Write-FixtureStage "copy-complete"
+  $json = @{ count = $items.Count; items = $items } | ConvertTo-Json -Depth 5 -Compress
 } catch {
-  @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
+  Write-FixtureStage ("helper-error " + $_.Exception.Message)
+  $json = @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }
+Write-FixtureStage "json-ready"
+$json
+Write-FixtureStage "script-complete"
 `, "utf8");
   const source = path.join(root, "原图.png");
   const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -42,16 +61,23 @@ try {
     const destination = path.join(root, `batch-${batch++}`);
     await mkdir(destination);
     const fixture = path.join(root, "fixture.json");
+    const progress = path.join(root, `${path.basename(destination)}-progress.log`);
     await writeFile(fixture, JSON.stringify({ destination, sources }), "utf8");
-    const result = await executeProcess(
-      path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runner, "-HelperPath", helper, "-FixturePath", fixture],
-      // Hosted Windows runners can need more than five seconds for a cold
-      // PowerShell/.NET start while the test suite is running in parallel.
-      { timeoutMs: 30_000 },
-    );
-    assert.equal(result.exitCode, 0, result.stderr);
-    return { destination, result: JSON.parse(result.stdout) };
+    try {
+      const result = await executeProcess(
+        path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runner, "-HelperPath", helper, "-FixturePath", fixture, "-ProgressPath", progress],
+        { timeoutMs: 30_000 },
+      );
+      assert.equal(result.exitCode, 0, result.stderr);
+      return { destination, result: JSON.parse(result.stdout) };
+    } catch (error) {
+      const stages = await readFile(progress, "utf8").catch((readError) => (
+        `No script progress available (${readError.code}); PowerShell may not have entered the runner.`
+      ));
+      t.diagnostic(`Clipboard fixture ${path.basename(destination)} progress:\n${stages}`);
+      throw error;
+    }
   };
   const normal = await run([source]);
   assert.equal(normal.result.count, 1);
