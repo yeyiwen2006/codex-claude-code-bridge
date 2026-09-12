@@ -13,6 +13,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { getCommandConfiguration } from "../../server/lib/claude-runner.mjs";
 
 const execute = promisify(execFile);
 const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -27,7 +28,6 @@ const project = path.join(root, "project");
 const dataRoot = path.join(codexHome, "plugins", "data", `${pluginName}-personal`);
 const reportPath = path.join(source, "artifacts", `release-host-${process.platform}.json`);
 const codex = process.env.BRIDGE_QA_CODEX_BIN || "codex";
-const claude = process.env.BRIDGE_QA_CLAUDE_BIN || "claude";
 const env = {
   ...process.env,
   HOME: profile,
@@ -141,7 +141,8 @@ try {
   }
   const codexVersion = await command(codex, ["--version"]);
   assert.match(codexVersion.stdout, /\b0\.153\.4\b/);
-  const claudeVersion = await command(claude, ["--version"]);
+  const claudeConfiguration = getCommandConfiguration(env);
+  const claudeVersion = await command(claudeConfiguration.command, [...claudeConfiguration.prefixArguments, "--version"]);
   assert.match(claudeVersion.stdout, /\b2\.1\.261\b/);
   check("fixed-runtime-versions");
 
@@ -314,6 +315,12 @@ try {
     check("new-real-claude-job-succeeds-after-interruption");
   }
 
+  stage = "receipt-presence-before-session-end";
+  const receiptEntries = await readdir(path.join(dataRoot, "state", "turn-receipts", threadId));
+  const completedReceipts = receiptEntries.filter((name) => name.endsWith(".done"));
+  assert.ok(completedReceipts.length > 0, "Real commands must create receipts before testing their cleanup");
+  check("real-turn-receipts-exist-before-session-end", { completedReceipts: completedReceipts.length });
+
   stage = "zero-host-model-use";
   assert.equal(hostRequests, 0);
   const tokenEvents = events.filter((event) => event.method === "thread/tokenUsage/updated");
@@ -350,8 +357,11 @@ try {
           state: await exists(path.join(dataRoot, "state", "sessions", `${threadId}.json`)),
           files: 0,
         };
-        for (const area of ["results", "jobs", "images", "hook-receipts"]) {
-          remaining.files += (await readdir(path.join(dataRoot, area, threadId)).catch((error) => {
+        for (const directory of [
+          ...["results", "jobs", "images"].map((area) => path.join(dataRoot, area, threadId)),
+          path.join(dataRoot, "state", "turn-receipts", threadId),
+        ]) {
+          remaining.files += (await readdir(directory).catch((error) => {
             if (error.code === "ENOENT") return [];
             throw error;
           })).length;

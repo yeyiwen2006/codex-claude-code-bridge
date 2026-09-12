@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   mkdir,
+  link,
   open,
   readFile,
   rename,
-  stat,
+  rmdir,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -26,7 +27,6 @@ export const DEFAULT_COMMAND_CONFIG = Object.freeze({
 
 const MAX_STATE_BYTES = 2 * 1024 * 1024;
 const LOCK_WAIT_MS = 5_000;
-const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -141,37 +141,110 @@ async function delay(milliseconds) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function lockOwnerIsRunning(lockPath) {
-  let ownerText;
-  try {
-    ownerText = await readFile(lockPath, "utf8");
-  } catch {
-    // A disappearing lock means its owner released it. Treat that as a retry,
-    // not a dead owner: unlinking here could remove a new owner's lock.
-    return true;
-  }
-  const ownerPid = Number(ownerText.trim());
-  if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
-    return true;
-  }
+export function parseLockOwnerPid(ownerText) {
+  let record;
+  try { record = JSON.parse(ownerText); } catch { return null; }
+  const pid = typeof record === "number" ? record : record?.pid;
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+function ownerIsDefinitelyGone(ownerPid) {
+  if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) return false;
   try {
     process.kill(ownerPid, 0);
+    return false;
+  } catch (error) {
+    return error?.code === "ESRCH";
+  }
+}
+
+async function readLockRecord(lockPath) {
+  let handle;
+  try {
+    handle = await open(lockPath, "r");
+    const details = await handle.stat();
+    if (!details.isFile() || details.size > 2048) return null;
+    const text = await handle.readFile("utf8");
+    const pid = parseLockOwnerPid(text);
+    if (!pid) return null;
+    const record = JSON.parse(text);
+    const token = typeof record?.token === "string" && /^[a-f0-9-]{36}$/.test(record.token) ? record.token : null;
+    // Legacy PID-only files use metadata from the same open handle. New files
+    // always have a random generation token; no file content is hashed.
+    const identity = `${details.dev}_${details.ino}_${details.birthtimeMs}_${details.mtimeMs}`;
+    return { text, pid, token, identity, generation: token ?? `legacy_${identity}_${pid}` };
+  } catch (error) { return error?.code === "ENOENT" ? { missing: true } : null; } finally { await handle?.close().catch(() => {}); }
+}
+
+function sameLockRecord(left, right) {
+  return left && right && left.text === right.text && left.identity === right.identity;
+}
+
+async function publishRecoveryClaim(directory, claimPath) {
+  const prepared = path.join(directory, `${randomUUID()}.prepared`);
+  try {
+    await writeFile(prepared, `${JSON.stringify({ pid: process.pid, token: randomUUID() })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    // link publishes complete metadata only if the destination does not exist.
+    // Unlike rename, it cannot overwrite a claim held by another reclaimer.
+    await link(prepared, claimPath);
     return true;
   } catch (error) {
-    return !(error && typeof error === "object" && error.code === "ESRCH");
+    if (error?.code === "EEXIST") return false;
+    throw error;
+  } finally { await unlink(prepared).catch(() => {}); }
+}
+
+async function reclaimDeadLock(dataRoot, lockPath) {
+  const observed = await readLockRecord(lockPath);
+  if (!observed || !ownerIsDefinitelyGone(observed.pid)) return false;
+  const directory = path.join(dataRoot, "locks", "recovery");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  let claimId = observed.generation;
+  const deadClaims = [];
+  // A recovery process can itself crash. Compete for a successor named by that
+  // dead claim's unique token; never delete an old claim to steal its slot.
+  for (let depth = 0; depth < 32; depth += 1) {
+    const claimPath = path.join(directory, `${claimId}.claim`);
+    if (await publishRecoveryClaim(directory, claimPath)) {
+      let generationObsolete = false;
+      try {
+        const current = await readLockRecord(lockPath);
+        if (!sameLockRecord(current, observed)) {
+          generationObsolete = current?.missing === true || Boolean(current?.pid);
+          return false;
+        }
+        if (!ownerIsDefinitelyGone(current.pid)) return false;
+        // All reclaimers for this generation share the claim chain. A delayed
+        // contender must re-read the generation after it obtains its own claim.
+        await unlink(lockPath);
+        generationObsolete = true;
+        return true;
+      } finally {
+        // Retain ancestors if the old generation still exists or is unknown.
+        // Removing one then would let a new claimant reuse the ancestor slot
+        // while a delayed contender still follows its successor.
+        if (generationObsolete) {
+          for (const deadClaim of deadClaims) await unlink(deadClaim).catch(() => {});
+        }
+        await unlink(claimPath).catch(() => {});
+        await rmdir(directory).catch(() => {});
+      }
+    }
+    const owner = await readLockRecord(claimPath);
+    if (!owner) return false;
+    if (!ownerIsDefinitelyGone(owner.pid) || !owner.token) return false;
+    deadClaims.push(claimPath);
+    claimId = owner.token;
   }
+  return false;
 }
 
 async function acquireLock(dataRoot, name, options = {}) {
   // Session locks add "session_" to the already validated session identifier.
   validateIdentifier(name, "Lock name", 136);
   const waitMs = options.waitMs ?? LOCK_WAIT_MS;
-  const staleMs = options.staleMs ?? LOCK_STALE_MS;
   if (!Number.isSafeInteger(waitMs) || waitMs < 0) {
     throw new InputError("Lock wait time must be a non-negative integer.");
-  }
-  if (!Number.isSafeInteger(staleMs) || staleMs <= 0) {
-    throw new InputError("Lock stale time must be a positive integer.");
   }
   await ensureDataDirectories(dataRoot);
   const lockPath = path.join(dataRoot, "locks", `${name}.lock`);
@@ -179,7 +252,7 @@ async function acquireLock(dataRoot, name, options = {}) {
   while (true) {
     try {
       const handle = await open(lockPath, "wx", 0o600);
-      await handle.writeFile(`${process.pid}\n`, "utf8");
+      await handle.writeFile(`${JSON.stringify({ pid: process.pid, token: randomUUID() })}\n`, "utf8");
       return { handle, lockPath };
     } catch (error) {
       // Windows can report EPERM while another handle is finishing deletion of
@@ -192,11 +265,9 @@ async function acquireLock(dataRoot, name, options = {}) {
         throw error;
       }
       try {
-        const details = await stat(lockPath);
-        if (Date.now() - details.mtimeMs > staleMs || !(await lockOwnerIsRunning(lockPath))) {
-          await unlink(lockPath);
-          continue;
-        }
+        // Age does not prove a lock is abandoned: long-running commands and
+        // inaccessible/reused PIDs must retain their locks.
+        if (await reclaimDeadLock(dataRoot, lockPath)) continue;
       } catch (statError) {
         if (statError && typeof statError === "object" && statError.code === "ENOENT") {
           continue;
