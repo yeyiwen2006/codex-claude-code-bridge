@@ -315,10 +315,10 @@ function resetConfigValue(config, key) {
     "persist-session": "persistSession",
     "conversation-context": "conversationContext",
   };
-  const property = map[key];
-  if (!property) {
+  if (!Object.hasOwn(map, key)) {
     throw new CommandError(`未知设置键：${key}`);
   }
+  const property = map[key];
   return { ...config, [property]: DEFAULT_COMMAND_CONFIG[property] };
 }
 

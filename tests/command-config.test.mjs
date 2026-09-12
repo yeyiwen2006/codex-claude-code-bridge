@@ -92,3 +92,12 @@ test("job cancellation, results and approvals remain usable with broken configur
   }
   assert.deepEqual(commands, ["cancel", "result", "allow", "deny", "answer"]);
 });
+
+test("config reset rejects inherited object keys without reporting a successful reset", async (t) => {
+  const { data, submit } = await fixture(t);
+  await saveCommandConfig(data, { ...DEFAULT_COMMAND_CONFIG, model: "sonnet" });
+  for (const key of ["constructor", "toString", "__proto__"]) {
+    assert.match((await submit(`claude config reset ${key}`)).reason, /未知设置键/);
+  }
+  assert.equal((await loadCommandConfig(data)).model, "sonnet");
+});

@@ -22,7 +22,11 @@ try {
   process.exit(1);
 }
 
-if (!Array.isArray(marketplace?.plugins)) {
+if (
+  typeof marketplace?.name !== "string"
+  || !/^[A-Za-z0-9_-]+$/.test(marketplace.name)
+  || !Array.isArray(marketplace?.plugins)
+) {
   process.stderr.write("The personal marketplace has an unsupported structure; no changes were made.\n");
   process.exit(1);
 }

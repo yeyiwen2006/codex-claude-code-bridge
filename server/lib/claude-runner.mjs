@@ -46,6 +46,11 @@ const CHILD_ENVIRONMENT_KEYS = new Set([
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
   "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL",
 ]);
 
 const verifiedExecutables = new Set();
@@ -120,9 +125,9 @@ function resolveClaudeExecutable(environment = process.env) {
     ? ["claude.exe", "claude.com"]
     : ["claude"];
   for (const rawDirectory of pathValue.split(path.delimiter)) {
-    // Ignore empty PATH entries because they mean the current project directory.
+    // Empty and relative PATH entries can resolve inside an untrusted project.
     const directory = rawDirectory.trim().replace(/^"(.*)"$/, "$1");
-    if (!directory) {
+    if (!path.isAbsolute(directory)) {
       continue;
     }
     for (const filename of filenames) {

@@ -89,7 +89,9 @@ test("does not inherit generated host scaffolding as visible user conversation",
   assert.match(result.text, /APP_CONTEXT_42/);
   assert.doesNotMatch(result.text, /recommended_plugins|host setup/);
   const mixed = await transcript([message("user", `${scaffolding}\n这是用户的真实请求，请解释这些设置。`)]);
-  assert.match((await readCodexConversation(mixed)).text, /这是用户的真实请求/);
+  const mixedResult = await readCodexConversation(mixed);
+  assert.match(mixedResult.text, /这是用户的真实请求/);
+  assert.doesNotMatch(mixedResult.text, /recommended_plugins|project instructions|host setup/);
 });
 
 test("keeps a large current task intact and trims inherited context to the prompt limit", () => {

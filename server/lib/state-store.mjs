@@ -43,8 +43,9 @@ export function resolvePluginData(environment = process.env) {
   return path.join(os.tmpdir(), "codex-claude-code-bridge-development-data");
 }
 
-function validateIdentifier(identifier, label) {
-  if (typeof identifier !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(identifier)) {
+function validateIdentifier(identifier, label, maximumLength = 128) {
+  if (typeof identifier !== "string" || !/^[A-Za-z0-9_-]{8,}$/.test(identifier)
+    || identifier.length > maximumLength) {
     throw new InputError(`${label} contains unsupported characters.`);
   }
   return identifier;
@@ -162,7 +163,8 @@ async function lockOwnerIsRunning(lockPath) {
 }
 
 async function acquireLock(dataRoot, name, options = {}) {
-  validateIdentifier(name, "Lock name");
+  // Session locks add "session_" to the already validated session identifier.
+  validateIdentifier(name, "Lock name", 136);
   const waitMs = options.waitMs ?? LOCK_WAIT_MS;
   const staleMs = options.staleMs ?? LOCK_STALE_MS;
   if (!Number.isSafeInteger(waitMs) || waitMs < 0) {

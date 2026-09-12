@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -137,4 +137,104 @@ test("clears canonical image paths when the data root is a filesystem alias", as
     (error) => error instanceof InputError && /supported PNG/.test(error.message),
   );
   await assert.rejects(access(invalidPath));
+});
+
+test("refuses to clear queued images through a redirected parent directory", async () => {
+  const sessionId = "redirected-image-session";
+  const state = { images: [], lastClipboardSequence: null };
+  let capturedDirectory;
+  await addClipboardImages(state, temporaryRoot, sessionId, {
+    captureFunction: async (destination) => {
+      capturedDirectory = path.join(destination, "batch");
+      await mkdir(capturedDirectory, { recursive: true });
+      const filePath = path.join(capturedDirectory, "image.png");
+      await writeFile(filePath, PNG_1X1);
+      return { clipboardSequence: "102", items: [{ path: filePath }] };
+    },
+  });
+  const outside = path.join(temporaryRoot, "outside-queue");
+  await mkdir(outside);
+  const outsideImage = path.join(outside, "image.png");
+  await writeFile(outsideImage, "unrelated original", "utf8");
+  await rename(capturedDirectory, `${capturedDirectory}-original`);
+  await symlink(outside, capturedDirectory, process.platform === "win32" ? "junction" : "dir");
+
+  await assert.rejects(clearQueuedImages(state, temporaryRoot, sessionId), /outside the private session queue/);
+  assert.equal(await readFile(outsideImage, "utf8"), "unrelated original");
+  assert.equal(state.images.length, 1);
+});
+
+test("cleans an interrupted capture batch while preserving already queued images", async () => {
+  const sessionId = "failed-capture-session";
+  const state = { images: [], lastClipboardSequence: null };
+  const [queued] = await addClipboardImages(state, temporaryRoot, sessionId, {
+    captureFunction: async (destination) => {
+      const filePath = path.join(destination, "original.png");
+      await writeFile(filePath, PNG_1X1);
+      return { clipboardSequence: "103", items: [{ path: filePath }] };
+    },
+  });
+  let failedBatch;
+  await assert.rejects(addClipboardImages(state, temporaryRoot, sessionId, {
+    captureFunction: async (destination) => {
+      failedBatch = destination;
+      await writeFile(path.join(destination, "partial.png"), PNG_1X1);
+      throw new Error("Clipboard helper exited before producing JSON");
+    },
+  }), /before producing JSON/);
+  await assert.rejects(access(failedBatch));
+  assert.deepEqual(await readFile(queued.storedPath), PNG_1X1);
+  assert.equal(state.images.length, 1);
+  assert.equal(state.lastClipboardSequence, "103");
+  await clearQueuedImages(state, temporaryRoot, sessionId);
+  await assert.rejects(access(path.join(temporaryRoot, "images", sessionId)));
+});
+
+test("rejects capture and clearing when an image root redirects outside plugin data", async () => {
+  for (const level of ["session", "images"]) {
+    const dataRoot = path.join(temporaryRoot, `redirected-${level}-data`);
+    const outside = path.join(temporaryRoot, `redirected-${level}-outside`);
+    const sessionId = "redirected-root-session";
+    await mkdir(dataRoot);
+    await mkdir(outside);
+    const externalSession = level === "session" ? outside : path.join(outside, sessionId);
+    await mkdir(externalSession, { recursive: true });
+    const imagesRoot = path.join(dataRoot, "images");
+    if (level === "session") await mkdir(imagesRoot);
+    await symlink(outside, level === "session" ? path.join(imagesRoot, sessionId) : imagesRoot,
+      process.platform === "win32" ? "junction" : "dir");
+    const original = path.join(externalSession, "original.png");
+    await writeFile(original, PNG_1X1);
+    const state = { images: [{ id: "outside-image", storedPath: original }], lastClipboardSequence: null };
+    await assert.rejects(clearQueuedImages(state, dataRoot, sessionId), /outside the plugin data directory/);
+    let captured = false;
+    await assert.rejects(addClipboardImages(state, dataRoot, sessionId, {
+      captureFunction: async () => { captured = true; throw new Error("capture should not run"); },
+    }), /outside the plugin data directory/);
+    assert.equal(captured, false);
+    assert.deepEqual(await readFile(original), PNG_1X1);
+    assert.equal(state.images.length, 1);
+  }
+});
+
+test("failed capture cleanup refuses a session root redirected outside plugin data", async () => {
+  const dataRoot = path.join(temporaryRoot, "cleanup-redirect-data");
+  const outside = path.join(temporaryRoot, "cleanup-redirect-outside");
+  await mkdir(dataRoot);
+  await mkdir(outside);
+  let original;
+  await assert.rejects(addClipboardImages({ images: [], lastClipboardSequence: null }, dataRoot,
+    "cleanup-redirect-session", {
+      captureFunction: async (destination) => {
+        const externalBatch = path.join(outside, path.basename(destination));
+        await mkdir(externalBatch);
+        original = path.join(externalBatch, "original.png");
+        await writeFile(original, PNG_1X1);
+        const sessionDirectory = path.dirname(destination);
+        await rename(sessionDirectory, `${sessionDirectory}-original`);
+        await symlink(outside, sessionDirectory, process.platform === "win32" ? "junction" : "dir");
+        throw new Error("capture interrupted after directory replacement");
+      },
+    }), /capture interrupted/);
+  assert.deepEqual(await readFile(original), PNG_1X1);
 });

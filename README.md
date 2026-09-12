@@ -53,6 +53,22 @@ Codex App 输入框可以选择 Codex Claude Code Bridge 插件，选择后会�
 
 首次安装以及更新后 Hook 被标记为 `new or changed` 时，都可以在 Codex App 的“设置”→“钩子”中重新审查并信任。也可以在 Codex CLI 中使用 `/hooks` 完成同样的操作。
 
+### 命令输入与“调整方向”
+
+请在当前回合结束后，将命令单独作为一条新消息发送。例如，要切换权限模式，直接发送：
+
+```text
+claude config set permission manual
+```
+
+App 的“调整方向”用于向正在运行的回合追加输入，见 [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server#lifecycle-overview)。目前已有通过这一入口发送上述命令却进入宿主模型的反馈，插件不保证这一入口的确定性拦截。遇到这种情况，请等待当前回合结束，再单独发送命令；如需提前停止，注意停止按钮会触发插件的 `Interrupt` 清理，可能取消正在运行的 Claude 任务。
+
+命令前后的空格、制表符和换行可以正常识别。去掉开头空白后，消息应直接以 `claude` 或 App 支持的 `/claude` 开头；不要添加“请执行下面的命令”等前言，也不要把命令包在 Markdown 代码块中。`claude config set permission manual 请执行` 这类尾随说明也不符合配置命令语法。需要向 Claude 描述任务时，请使用 `claude run -- <任务描述>`。
+
+为减少误拦截，插件只识别消息开头的命令；普通 `claude` 前缀后还必须是支持的子命令或消息结束。因此，讨论文字里的 `claude help`、代码块中的示例、`claudette` 和 `claude is expensive` 都不会触发确定性命令。附件消息只从严格匹配的宿主附件包装中的 `## My request:` 请求区提取命令，不从文件名或附件说明中搜索命令。这是格式识别规则，不是对附件内容可信性的认证。
+
+“调整方向”未拦截的具体原因仍需结合宿主实际交给 Hook 的输入确认，不能仅凭现象断言 App 自动添加了前缀。如果正常新消息中的 `claude help` 也进入模型，请检查 Hook 是否启用和已信任；插件更新后还应完全退出并重新打开 App，仅新建任务窗口可能仍沿用进程内的旧版插件路径。
+
 ### 在 Codex CLI 中
 
 1. 运行 `codex`。
@@ -307,6 +323,10 @@ codex plugin add codex-claude-code-bridge@personal
 - 详细威胁模型见 [SECURITY.md](./SECURITY.md)。
 
 ## 开发、验证与公开发布
+
+当前准备版本为 **0.3.6**。本轮修复了审批取消、后台任务启动、MCP 请求校验、图片清理和模型映射透传等问题，具体变更见 [更新记录](./CHANGELOG.md)，测试结果与未覆盖范围见 [测试记录](./TESTING.md)。
+
+配置自定义模型服务时，MCP 路径会透传 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL`、`ANTHROPIC_DEFAULT_SONNET_MODEL`、`ANTHROPIC_DEFAULT_HAIKU_MODEL` 和 `CLAUDE_CODE_SUBAGENT_MODEL`。Claude 可执行文件需位于 PATH 的绝对目录中，也可以用 `CLAUDE_CODE_BRIDGE_COMMAND` 指定绝对路径。
 
 ```powershell
 npm install

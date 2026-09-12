@@ -49,6 +49,22 @@ The App's plugin picker or `@` mention displays the plugin name above the compos
 
 For both initial installation and updates marked `new or changed`, you can review and trust the hooks in **Settings → Hooks** in the Codex App. You can also complete the same review with `/hooks` in Codex CLI.
 
+### Command input and steering an active turn
+
+After the current turn finishes, send the command by itself as a new message. For example, to change the permission mode, send:
+
+```text
+claude config set permission manual
+```
+
+The App's steering action ("调整方向") appends input to an active turn; see the [OpenAI App Server documentation](https://learn.chatgpt.com/docs/app-server#lifecycle-overview). Users have reported the command above reaching the host model through this entry point, so the plugin does not guarantee deterministic interception there. Wait for the current turn to finish, then send the command separately. If you stop the turn early, remember that the stop button triggers the plugin's `Interrupt` cleanup and may cancel an active Claude task.
+
+Leading and trailing spaces, tabs, and line breaks are accepted. After leading whitespace is removed, the message must start directly with `claude`, or `/claude` in the App. Do not add an introduction such as "Please execute this command" or wrap the command in a Markdown code block. Trailing prose such as `claude config set permission manual please` also violates the configuration command syntax. To describe work for Claude, use `claude run -- <task description>`.
+
+To reduce accidental interception, the plugin only recognizes commands at the beginning of a message. The plain `claude` prefix must also be followed by a supported subcommand or the end of the message. A mention of `claude help` within prose, a code-block example, `claudette`, or `claude is expensive` will not trigger a deterministic command. For attachments, commands are extracted only from the `## My request:` section of a strictly matched host attachment envelope, never by searching file names or attachment descriptions. This is format recognition, not authentication of attachment content.
+
+The specific cause of failed steering interception still requires the actual input delivered to the hook; the symptom alone does not establish that the App adds a prefix. If `claude help` also reaches the model as a normal new message, check that the hook is enabled and trusted. After updating the plugin, fully quit and reopen the App: a new task window may still use an old plugin path cached by the running process.
+
 ## Codex CLI
 
 1. Run `codex`.
@@ -255,6 +271,10 @@ Start a new local Codex or ChatGPT Work task after every install or update. When
 - See [SECURITY.md](./SECURITY.md) for the detailed threat model.
 
 ## Development and publishing
+
+The prepared version is **0.3.6**. This update fixes approval cancellation, worker startup, MCP request validation, image cleanup and provider model forwarding. See the [changelog](./CHANGELOG.md) and [test record](./TESTING.md) for the changes, results and remaining coverage limits.
+
+For custom model providers, the MCP path forwards `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`. The Claude executable must be in an absolute PATH directory, or specified with an absolute `CLAUDE_CODE_BRIDGE_COMMAND` path.
 
 ```powershell
 npm install

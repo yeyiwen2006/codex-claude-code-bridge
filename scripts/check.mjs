@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateUtf8Text } from "./lib/check-text.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -55,6 +56,7 @@ const sourceFiles = [
   "server/lib/claude-stdio-control.mjs",
   "server/lib/file-operation-report.mjs",
   "server/lib/validation.mjs",
+  "server/lib/version.mjs",
   "server/lib/command-parser.mjs",
   "server/lib/command-handler.mjs",
   "server/lib/codex-transcript.mjs",
@@ -67,6 +69,9 @@ const sourceFiles = [
   "server/lib/image-queue.mjs",
   "server/lib/state-store.mjs",
   "scripts/command-hook.mjs",
+  "scripts/register-personal-marketplace.mjs",
+  "scripts/unregister-personal-marketplace.mjs",
+  "scripts/lib/check-text.mjs",
 ];
 for (const relativePath of sourceFiles) {
   const absolutePath = path.join(repositoryRoot, relativePath);
@@ -98,11 +103,8 @@ async function textFiles(directory) {
   return files;
 }
 
-const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 for (const filePath of await textFiles(repositoryRoot)) {
-  const decoded = utf8Decoder.decode(await readFile(filePath));
-  assert.equal(decoded.includes("\uFFFD"), false, `${filePath} contains a replacement character`);
-  assert.equal(decoded.charCodeAt(0) === 0xFEFF, false, `${filePath} contains a UTF-8 BOM`);
+  validateUtf8Text(await readFile(filePath), filePath);
 }
 
 process.stdout.write("Static checks passed.\n");

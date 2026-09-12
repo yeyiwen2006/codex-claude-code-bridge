@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import {
   BridgeProcessError,
   buildClaudeArguments,
   buildNativeClaudeArguments,
+  getCommandConfiguration,
   getClaudeHealth,
   runClaude,
   runClaudeNative,
@@ -51,6 +52,21 @@ test("builds fixed argument arrays without prompt text or a permission bypass", 
   assert.equal(argumentsList.includes("--prompt-that-looks-like-an-option"), false);
   assert.ok(argumentsList.includes("Read,Glob,Grep,Edit,Write"));
   assert.ok(argumentsList.includes("Bash,PowerShell,WebFetch,WebSearch,mcp__*"));
+});
+
+test("ignores relative PATH entries when locating Claude Code", async () => {
+  const executable = path.join(temporaryDirectory, process.platform === "win32" ? "claude.exe" : "claude");
+  await writeFile(executable, "fixture executable, never launched", "utf8");
+  await chmod(executable, 0o755);
+  const originalDirectory = process.cwd();
+  try {
+    process.chdir(temporaryDirectory);
+    assert.throws(() => getCommandConfiguration({ PATH: "." }),
+      (error) => error instanceof BridgeProcessError && error.code === "ENOENT");
+  } finally {
+    process.chdir(originalDirectory);
+  }
+  assert.equal(getCommandConfiguration({ PATH: temporaryDirectory }).command, await realpath(executable));
 });
 
 test("builds native bypass arguments without bridge tool or network denials", async () => {
@@ -202,6 +218,25 @@ test("does not pass unrelated host secrets into Claude", async () => {
     environment: { ...process.env, GITHUB_TOKEN: "must-not-leak" },
   });
   assert.equal(result.result, "secret-absent");
+});
+
+test("preserves explicit provider model mappings through MCP and the restricted runner", async () => {
+  const models = {
+    ANTHROPIC_MODEL: "fixture-primary[1m]",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "fixture-opus[1m]",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "fixture-sonnet[1m]",
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "fixture-haiku",
+    CLAUDE_CODE_SUBAGENT_MODEL: "fixture-subagent",
+  };
+  const result = await runClaude(await makeInput({ prompt: "__MODEL_ENV__" }), {
+    commandConfiguration,
+    environment: { ...process.env, ...models },
+  });
+  assert.deepEqual(JSON.parse(result.result), models);
+  const config = JSON.parse(await readFile(new URL("../.mcp.json", import.meta.url), "utf8"));
+  for (const key of Object.keys(models)) {
+    assert.ok(config.mcpServers.codex_claude_code_bridge.env_vars.includes(key), `${key} must reach the MCP server`);
+  }
 });
 
 test("enforces the child output byte limit", async () => {

@@ -45,6 +45,7 @@ if (
   marketplace === null
   || typeof marketplace !== "object"
   || typeof marketplace.name !== "string"
+  || !/^[A-Za-z0-9_-]+$/.test(marketplace.name)
   || !Array.isArray(marketplace.plugins)
 ) {
   process.stderr.write("The existing personal marketplace has an unsupported structure; no changes were made.\n");

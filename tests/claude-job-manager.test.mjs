@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { approvalText, cancelClaudeJob, describeClaudeJob, resolveClaudeApproval } from "../server/lib/claude-job-manager.mjs";
+import { approvalText, cancelClaudeJob, describeClaudeJob, resolveClaudeApproval, startClaudeJob } from "../server/lib/claude-job-manager.mjs";
 import {
   loadSessionState,
   saveSessionState,
@@ -14,6 +17,34 @@ import {
 const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const jobId = "a1b2c3d4";
 const approvalId = "f0e1d2c3";
+
+for (const asynchronous of [false, true]) {
+test(`marks a job failed and removes its spec after ${asynchronous ? "asynchronous" : "synchronous"} worker launch failure`, async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-worker-start-failed-"));
+  const originalSpawn = childProcess.spawn;
+  try {
+    childProcess.spawn = () => {
+      const error = new Error("fixture launch failed");
+      if (!asynchronous) throw error;
+      const child = new EventEmitter();
+      process.nextTick(() => child.emit("error", error));
+      return child;
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(startClaudeJob({ input: { permissionMode: "plan", timeoutSeconds: 1 } }, {
+      dataRoot, sessionId, environment: {},
+    }), /fixture launch failed/);
+    const state = await loadSessionState(dataRoot, sessionId);
+    assert.equal(state.activeJob.status, "failed");
+    assert.match(state.activeJob.error, /fixture launch failed/);
+    assert.deepEqual(await readdir(path.join(dataRoot, "jobs", sessionId)), []);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+}
 
 test("a submitted decision is described as resuming instead of repeating the old request", () => {
   const text = approvalText({

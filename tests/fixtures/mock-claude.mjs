@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { writeFile } from "node:fs/promises";
+
 const argumentsList = process.argv.slice(2);
 
 if (argumentsList.length === 1 && argumentsList[0] === "--version") {
@@ -34,7 +36,11 @@ if (prompt === "__FAIL__") {
   process.exit(2);
 }
 
-if (prompt === "__HANG__") {
+const readyMatch = /__HANG_READY__\n([^\r\n]+)/.exec(prompt);
+if (prompt === "__HANG__" || readyMatch) {
+  if (readyMatch) {
+    await writeFile(readyMatch[1], "ready", "utf8");
+  }
   setInterval(() => {}, 1_000);
   await new Promise(() => {});
 }
@@ -69,6 +75,14 @@ if (prompt === "__CLAUDE_ERROR__") {
     session_id: "11111111-2222-4333-8444-555555555555",
     permission_denials: [],
   };
+} else if (prompt === "__MODEL_ENV__") {
+  const modelKeys = ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"];
+  envelope = {
+    type: "result", subtype: "success", is_error: false,
+    result: JSON.stringify(Object.fromEntries(modelKeys.filter((key) => process.env[key] !== undefined)
+      .map((key) => [key, process.env[key]]))),
+  };
 } else if (prompt === "__BIG__" || prompt === "__BIG_STDERR__") {
   // A forced exit can discard pipe buffers on macOS before the limit is reached.
   const output = prompt === "__BIG_STDERR__" ? process.stderr : process.stdout;
@@ -82,7 +96,7 @@ if (prompt === "__CLAUDE_ERROR__") {
     ? argumentsList[resumeIndex + 1]
     : "11111111-2222-4333-8444-555555555555";
   const emptyEnvelope = ["__EMPTY__", "__EMPTY_WITH_ASSISTANT__", "__STOP_HOOK_LOOP__"].includes(prompt);
-  const resultText = emptyEnvelope ? "" : `mock:${prompt}`;
+  const resultText = emptyEnvelope ? "" : prompt === "__ARGS__" ? JSON.stringify(argumentsList) : `mock:${prompt}`;
   emittedAssistantText = prompt === "__EMPTY__"
     ? undefined
     : prompt === "__EMPTY_WITH_ASSISTANT__"

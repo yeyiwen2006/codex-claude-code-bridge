@@ -39,17 +39,18 @@ function visibleMessage(record, currentPrompt) {
   if (payload.role === "assistant" && payload.phase && !["commentary", "final_answer"].includes(payload.phase)) {
     return null;
   }
-  const text = visibleText(payload.content);
+  let text = visibleText(payload.content);
   if (!text) return null;
   if (payload.role === "user") {
     if (text === currentPrompt || extractClaudeCommandPrompt(text) !== null) return null;
     // Codex stores its generated environment preamble as a user message too.
     // Only exclude a complete recognized preamble, never a user's trailing request.
-    const withoutPreamble = text
+    text = text
       .replace(/^<recommended_plugins>[\s\S]*?<\/recommended_plugins>\s*/u, "")
       .replace(/^# AGENTS\.md instructions for [^\n]+\n+<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/u, "")
-      .replace(/^<environment_context>[\s\S]*?<\/environment_context>\s*/u, "");
-    if (withoutPreamble !== text && !withoutPreamble.trim()) return null;
+      .replace(/^<environment_context>[\s\S]*?<\/environment_context>\s*/u, "")
+      .trim();
+    if (!text) return null;
   }
   return {
     role: payload.role,

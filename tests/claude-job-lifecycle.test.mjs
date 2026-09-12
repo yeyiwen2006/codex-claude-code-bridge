@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -11,11 +12,41 @@ import {
   synchronousWaitMilliseconds,
 } from "../server/lib/claude-job-manager.mjs";
 import { handleHookEvent } from "../server/lib/command-handler.mjs";
-import { loadSessionState } from "../server/lib/state-store.mjs";
+import { loadSessionState, saveSessionState } from "../server/lib/state-store.mjs";
 import { normalizeRunInput } from "../server/lib/validation.mjs";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const mockClaude = path.join(testDirectory, "fixtures", "mock-claude.mjs");
+
+test("a worker cancelled before startup does not attempt to resolve Claude", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-prestart-cancel-"));
+  const sessionId = "prestart-cancel-session";
+  const jobId = "abcd1234";
+  try {
+    const specDirectory = path.join(dataRoot, "jobs", sessionId);
+    await mkdir(specDirectory, { recursive: true });
+    await writeFile(path.join(specDirectory, `${jobId}.json`), JSON.stringify({
+      request: await requestFor(dataRoot, "must never run", 1),
+    }), "utf8");
+    await saveSessionState(dataRoot, sessionId, { activeJob: {
+      id: jobId, status: "starting", cancelRequested: true,
+    } });
+    const child = spawn(process.execPath, [path.join(testDirectory, "../server/lib/claude-job-worker.mjs"), dataRoot, sessionId, jobId], {
+      shell: false, windowsHide: true, stdio: "ignore", env: {
+        ...process.env, CLAUDE_CODE_BRIDGE_COMMAND: path.join(dataRoot, "absent-claude.exe"),
+      },
+    });
+    await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    const state = await loadSessionState(dataRoot, sessionId);
+    assert.equal(state.activeJob.status, "cancelled");
+    assert.doesNotMatch(state.activeJob.error, /not accessible/);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
 
 function mockEnvironment() {
   return {

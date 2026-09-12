@@ -107,6 +107,10 @@ async function main() {
   try {
     await mutateSession(async (state) => {
       if (state.activeJob?.id !== jobId) throw new Error("Claude Code job is no longer active.");
+      if (state.activeJob.cancelRequested || state.sessionEnded) {
+        abortController.abort(new Error("Claude Code job cancelled before startup."));
+        throw abortController.signal.reason;
+      }
       state.activeJob.status = "running";
       state.activeJob.updatedAt = Date.now();
     });

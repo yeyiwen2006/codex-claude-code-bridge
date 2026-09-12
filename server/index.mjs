@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { getClaudeHealth, runClaude } from "./lib/claude-runner.mjs";
+import { BRIDGE_VERSION } from "./lib/version.mjs";
 import {
   EFFORT_LEVELS,
   CUSTOMIZATION_SOURCES,
@@ -17,7 +18,6 @@ import {
 } from "./lib/validation.mjs";
 
 const SERVER_NAME = "codex-claude-code-bridge";
-const SERVER_VERSION = "0.3.5";
 const FALLBACK_PROTOCOL_VERSION = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
@@ -218,7 +218,13 @@ function authorizationFor(identifier) {
 }
 
 function writeScopesFor(input) {
-  return [input.workingDirectory, ...input.extraDirectories];
+  // Image parents are granted with --add-dir by the runner and therefore need
+  // the same write exclusion as explicitly requested extra directories.
+  return [
+    input.workingDirectory,
+    ...input.extraDirectories,
+    ...input.imagePaths.map((imagePath) => path.dirname(imagePath)),
+  ];
 }
 
 async function runWithLocks(input, isModification, operation) {
@@ -437,15 +443,25 @@ export async function handleMessage(message) {
   }
 
   const { id, method, params } = message;
-
-  if (method === "notifications/cancelled") {
-    const cancelledId = params?.requestId;
-    activeRequests.get(requestKey(cancelledId))?.abort();
+  const hasId = Object.hasOwn(message, "id");
+  const validId = typeof id === "string" || (typeof id === "number" && Number.isFinite(id));
+  if (message.jsonrpc !== "2.0" || typeof method !== "string" || (hasId && !validId)) {
+    return jsonRpcError(validId ? id : null, -32600, "Invalid Request");
+  }
+  if (params !== undefined && (params === null || typeof params !== "object" || Array.isArray(params))) {
+    return hasId ? jsonRpcError(id, -32602, "Request params must be a JSON object.") : undefined;
+  }
+  // MCP requests require an id. Never execute tools from a notification, even
+  // when its method happens to be a request method such as tools/call.
+  if (!hasId) {
+    if (method === "notifications/cancelled") {
+      const cancelledId = params?.requestId;
+      activeRequests.get(requestKey(cancelledId))?.abort();
+    }
     return undefined;
   }
-
-  if (method === "notifications/initialized") {
-    return undefined;
+  if (activeRequests.has(requestKey(id))) {
+    return jsonRpcError(id, -32600, "Request id is already active.");
   }
 
   if (method === "initialize") {
@@ -458,7 +474,7 @@ export async function handleMessage(message) {
       },
       serverInfo: {
         name: SERVER_NAME,
-        version: SERVER_VERSION,
+        version: BRIDGE_VERSION,
       },
       instructions: "Prefer deterministic claude commands when the user asks for them. The Codex App also accepts the /claude alias, but Codex CLI requires the form without a slash. For model-directed calls, use claude_code_plan for read-only work and claude_code_run only when the user permits changes. Shell and web tools are unavailable; verify file changes afterward.",
     });
@@ -476,6 +492,13 @@ export async function handleMessage(message) {
     if (typeof params?.name !== "string") {
       return jsonRpcError(id, -32602, "tools/call requires a tool name.");
     }
+    if (!TOOLS.some((tool) => tool.name === params.name)) {
+      return jsonRpcError(id, -32602, `Unknown tool '${params.name}'.`);
+    }
+    if (params.arguments !== undefined && (params.arguments === null
+      || typeof params.arguments !== "object" || Array.isArray(params.arguments))) {
+      return jsonRpcError(id, -32602, "Tool arguments must be a JSON object.");
+    }
     const controller = new AbortController();
     const typedRequestKey = requestKey(id);
     activeRequests.set(typedRequestKey, controller);
@@ -491,9 +514,6 @@ export async function handleMessage(message) {
     }
   }
 
-  if (typeof method === "string" && method.startsWith("notifications/")) {
-    return undefined;
-  }
   return jsonRpcError(id ?? null, -32601, `Method not found: ${String(method)}`);
 }
 

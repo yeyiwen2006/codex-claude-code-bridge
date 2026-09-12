@@ -29,7 +29,7 @@ async function mutateSession(dataRoot, sessionId, operation) {
   return withStateLock(dataRoot, sessionLockName(sessionId), async () => {
     const state = await loadSessionState(dataRoot, sessionId);
     const result = await operation(state);
-    await saveSessionState(dataRoot, sessionId, state);
+    if (result !== false) await saveSessionState(dataRoot, sessionId, state);
     return result;
   });
 }
@@ -43,16 +43,22 @@ function jobSpecPath(dataRoot, sessionId, jobId) {
 }
 
 function spawnWorker(dataRoot, sessionId, jobId, environment) {
-  const child = spawn(process.execPath, [WORKER_PATH, dataRoot, sessionId, jobId], {
-    cwd: process.cwd(),
-    env: environment,
-    detached: true,
-    shell: false,
-    windowsHide: true,
-    stdio: "ignore",
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [WORKER_PATH, dataRoot, sessionId, jobId], {
+      cwd: process.cwd(),
+      env: environment,
+      detached: true,
+      shell: false,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    // A failed spawn emits an asynchronous error and never starts a worker.
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve(child.pid);
+    });
   });
-  child.unref();
-  return child.pid;
 }
 
 export function approvalText(job) {
@@ -154,6 +160,7 @@ export async function startClaudeJob(request, context) {
     mode: 0o600,
     flag: "wx",
   });
+  let workerPid;
   try {
     await mutateSession(context.dataRoot, context.sessionId, async (state) => {
       if (activeStatus(state.activeJob)) {
@@ -174,15 +181,30 @@ export async function startClaudeJob(request, context) {
         error: null,
       };
     });
-    const workerPid = spawnWorker(context.dataRoot, context.sessionId, jobId, context.environment);
+    workerPid = await spawnWorker(context.dataRoot, context.sessionId, jobId, context.environment);
     await mutateSession(context.dataRoot, context.sessionId, async (state) => {
       if (state.activeJob?.id === jobId) {
         state.activeJob.workerPid = workerPid;
         state.activeJob.updatedAt = Date.now();
+      } else {
+        return false;
       }
     });
   } catch (error) {
-    await unlink(specPath).catch(() => {});
+    if (!workerPid) await unlink(specPath).catch(() => {});
+    await mutateSession(context.dataRoot, context.sessionId, async (state) => {
+      const job = state.activeJob;
+      if (job?.id !== jobId || !activeStatus(job)) return false;
+      if (workerPid) {
+        // The worker may already be reading its spec; let it publish its own
+        // terminal result after cancellation instead of removing that input.
+        job.cancelRequested = true;
+      } else {
+        job.status = "failed";
+        job.error = error instanceof Error ? error.message : String(error);
+      }
+      job.updatedAt = Date.now();
+    }).catch(() => {});
     throw error;
   }
   return waitForJobEvent(

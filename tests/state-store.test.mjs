@@ -4,7 +4,20 @@ import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { loadCommandConfig, saveCommandConfig, withStateLock } from "../server/lib/state-store.mjs";
+import { loadCommandConfig, loadSessionState, saveCommandConfig, saveSessionState, sessionLockName, withStateLock } from "../server/lib/state-store.mjs";
+
+test("locks and saves a session with the maximum supported identifier length", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-long-session-lock-"));
+  const sessionId = "a".repeat(128);
+  try {
+    await withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+      await saveSessionState(dataRoot, sessionId, { claudeSessionId: "fixture-session" });
+    });
+    assert.equal((await loadSessionState(dataRoot, sessionId)).claudeSessionId, "fixture-session");
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
 
 test("keeps the previous state readable while retrying a busy file replacement", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-state-replace-"));

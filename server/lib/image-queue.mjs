@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, realpath, rmdir, stat, unlink } from "node:fs/promises";
+import { mkdir, open, readdir, realpath, rmdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { executeProcess } from "./claude-runner.mjs";
@@ -15,6 +15,18 @@ function sessionImageDirectory(dataRoot, sessionId) {
     throw new InputError("Session ID contains unsupported characters.");
   }
   return path.join(dataRoot, "images", sessionId);
+}
+
+async function privateImageDirectory(dataRoot, directory) {
+  const canonicalDataRoot = await realpath(dataRoot);
+  const canonicalImages = await realpath(path.join(dataRoot, "images"));
+  const canonicalDirectory = await realpath(directory);
+  for (const candidate of [canonicalImages, canonicalDirectory]) {
+    if (!pathIsWithinRoot(canonicalDataRoot, candidate) || path.relative(canonicalDataRoot, candidate) === "") {
+      throw new InputError("Refusing an image directory outside the plugin data directory.");
+    }
+  }
+  return canonicalDirectory;
 }
 
 function windowsPowerShellPath(environment) {
@@ -58,28 +70,23 @@ function identifyImage(buffer) {
   throw new InputError("Clipboard data is not a supported PNG, JPEG, GIF, or WebP image.");
 }
 
-async function removeCaptured(items, destination) {
+async function removeCaptureDirectory(dataRoot, destination, sessionDirectory) {
   let canonicalDestination;
   try {
-    canonicalDestination = await realpath(destination);
+    const canonicalSession = await privateImageDirectory(dataRoot, sessionDirectory);
+    canonicalDestination = await privateImageDirectory(dataRoot, destination);
+    if (!pathIsWithinRoot(canonicalSession, canonicalDestination)
+      || path.relative(canonicalSession, canonicalDestination) === "") return;
   } catch {
     // Without a canonical private root, no captured path is safe to remove.
     return;
   }
-  for (const item of items) {
-    if (typeof item?.path !== "string") {
-      continue;
-    }
-    let resolved;
-    try {
-      resolved = await realpath(item.path);
-    } catch {
-      continue;
-    }
-    if (pathIsWithinRoot(canonicalDestination, resolved)) {
-      await unlink(resolved).catch(() => {});
+  for (const entry of await readdir(canonicalDestination, { withFileTypes: true })) {
+    if (entry.isFile() || entry.isSymbolicLink()) {
+      await unlink(path.join(canonicalDestination, entry.name)).catch(() => {});
     }
   }
+  await rmdir(canonicalDestination).catch(() => {});
 }
 
 export async function captureWindowsClipboard(destination, options = {}) {
@@ -125,6 +132,9 @@ export async function captureWindowsClipboard(destination, options = {}) {
 }
 
 export async function validateCapturedImages(capture, destination) {
+  if (!isRecord(capture) || !Array.isArray(capture.items) || capture.items.length === 0) {
+    throw new InputError("The clipboard helper returned no supported images.");
+  }
   const canonicalDestination = await realpath(destination);
   const normalized = [];
   for (const rawItem of capture.items) {
@@ -159,10 +169,19 @@ export async function validateCapturedImages(capture, destination) {
 }
 
 export async function addClipboardImages(state, dataRoot, sessionId, options = {}) {
-  const destination = sessionImageDirectory(dataRoot, sessionId);
+  const sessionDirectory = sessionImageDirectory(dataRoot, sessionId);
+  const destination = path.join(sessionDirectory, randomUUID());
   const captureFunction = options.captureFunction ?? captureWindowsClipboard;
-  const capture = await captureFunction(destination, options);
+  await mkdir(path.join(dataRoot, "images"), { recursive: true, mode: 0o700 });
+  await privateImageDirectory(dataRoot, path.join(dataRoot, "images"));
+  await mkdir(sessionDirectory, { recursive: true, mode: 0o700 });
+  await privateImageDirectory(dataRoot, sessionDirectory);
+  await mkdir(destination, { recursive: true, mode: 0o700 });
   try {
+    await privateImageDirectory(dataRoot, destination);
+    const capture = await captureFunction(destination, options);
+    await privateImageDirectory(dataRoot, destination);
+    const images = await validateCapturedImages(capture, destination);
     if (
       options.force !== true
       && state.lastClipboardSequence !== null
@@ -170,7 +189,6 @@ export async function addClipboardImages(state, dataRoot, sessionId, options = {
     ) {
       throw new InputError("剪贴板内容与上次 image add 相同；如需重复加入，请使用 claude image add --force。");
     }
-    const images = await validateCapturedImages(capture, destination);
     const combined = [...state.images, ...images];
     if (combined.length > MAX_IMAGES) {
       throw new InputError(`图片队列最多保存 ${MAX_IMAGES} 张图片。`);
@@ -183,7 +201,7 @@ export async function addClipboardImages(state, dataRoot, sessionId, options = {
     state.lastClipboardSequence = String(capture.clipboardSequence);
     return images;
   } catch (error) {
-    await removeCaptured(capture.items, destination);
+    await removeCaptureDirectory(dataRoot, destination, sessionDirectory).catch(() => {});
     throw error;
   }
 }
@@ -192,8 +210,9 @@ export async function clearQueuedImages(state, dataRoot, sessionId, selectedIds)
   const destination = sessionImageDirectory(dataRoot, sessionId);
   let canonicalDestination;
   try {
-    canonicalDestination = await realpath(destination);
+    canonicalDestination = await privateImageDirectory(dataRoot, destination);
   } catch (error) {
+    if (error instanceof InputError) throw error;
     if (state.images.length === 0 && error && typeof error === "object" && error.code === "ENOENT") {
       state.lastClipboardSequence = null;
       return 0;
@@ -212,11 +231,22 @@ export async function clearQueuedImages(state, dataRoot, sessionId, selectedIds)
     if (!pathIsWithinRoot(canonicalDestination, resolved)) {
       throw new InputError("Refusing to remove an image outside the private session queue.");
     }
-    await unlink(resolved).catch((error) => {
-      if (!(error && typeof error === "object" && error.code === "ENOENT")) {
-        throw error;
+    try {
+      // A queued subdirectory may have become a junction since capture. Check
+      // the real parent before unlinking; unlink itself never follows a file link.
+      const canonicalParent = await privateImageDirectory(dataRoot, path.dirname(resolved));
+      if (!pathIsWithinRoot(canonicalDestination, canonicalParent)) {
+        throw new InputError("Refusing to remove an image outside the private session queue.");
       }
-    });
+      await unlink(path.join(canonicalParent, path.basename(resolved)));
+      if (canonicalParent !== canonicalDestination) {
+        await rmdir(canonicalParent).catch((error) => {
+          if (!["ENOENT", "ENOTEMPTY"].includes(error?.code)) throw error;
+        });
+      }
+    } catch (error) {
+      if (!(error && typeof error === "object" && error.code === "ENOENT")) throw error;
+    }
     removed += 1;
   }
   state.images = kept;

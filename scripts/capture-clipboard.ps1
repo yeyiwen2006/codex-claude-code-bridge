@@ -28,6 +28,36 @@ function New-DestinationPath([string]$Extension) {
   return [System.IO.Path]::Combine($Destination, ([Guid]::NewGuid().ToString("N") + $Extension.ToLowerInvariant()))
 }
 
+function Copy-ClipboardFileDrop([string[]]$Files) {
+  $sources = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+  $totalBytes = [long]0
+  foreach ($sourcePath in $Files) {
+    if (-not [System.IO.File]::Exists($sourcePath)) { continue }
+    $source = [System.IO.FileInfo]::new($sourcePath)
+    if ($supportedExtensions -notcontains $source.Extension.ToLowerInvariant()) { continue }
+    if ($source.Length -le 0 -or $source.Length -gt 25MB) {
+      throw "Each clipboard image must be a non-empty file no larger than 25 MiB."
+    }
+    $sources.Add($source)
+    $totalBytes += $source.Length
+    if ($sources.Count -gt 20 -or $totalBytes -gt 100MB) {
+      throw "A clipboard capture cannot exceed 20 images or 100 MiB."
+    }
+  }
+  $captured = [System.Collections.Generic.List[object]]::new()
+  foreach ($source in $sources) {
+    $destinationPath = New-DestinationPath $source.Extension
+    [System.IO.File]::Copy($source.FullName, $destinationPath, $false)
+    $captured.Add([ordered]@{
+      path = $destinationPath
+      sourceName = $source.Name
+      sourceFormat = "FileDrop"
+      byteExact = $true
+    })
+  }
+  return ,$captured
+}
+
 function Get-ClipboardDataObject {
   $lastError = $null
   for ($attempt = 0; $attempt -lt 6; $attempt++) {
@@ -50,23 +80,7 @@ $items = [System.Collections.Generic.List[object]]::new()
 
 if ($data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
   $files = [string[]]$data.GetData([System.Windows.Forms.DataFormats]::FileDrop)
-  foreach ($sourcePath in $files) {
-    if (-not [System.IO.File]::Exists($sourcePath)) {
-      continue
-    }
-    $extension = [System.IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
-    if ($supportedExtensions -notcontains $extension) {
-      continue
-    }
-    $destinationPath = New-DestinationPath $extension
-    [System.IO.File]::Copy($sourcePath, $destinationPath, $false)
-    $items.Add([ordered]@{
-      path = $destinationPath
-      sourceName = [System.IO.Path]::GetFileName($sourcePath)
-      sourceFormat = "FileDrop"
-      byteExact = $true
-    })
-  }
+  $items = Copy-ClipboardFileDrop $files
 }
 
 if ($items.Count -eq 0) {
@@ -82,7 +96,15 @@ if ($items.Count -eq 0) {
         if ($pngData.CanSeek) {
           $pngData.Position = 0
         }
-        $pngData.CopyTo($output)
+        $buffer = [byte[]]::new(65536)
+        $copiedBytes = [long]0
+        while (($readBytes = $pngData.Read($buffer, 0, $buffer.Length)) -gt 0) {
+          $copiedBytes += $readBytes
+          if ($copiedBytes -gt 25MB) {
+            throw "Clipboard PNG data exceeds 25 MiB."
+          }
+          $output.Write($buffer, 0, $readBytes)
+        }
       } finally {
         $output.Dispose()
         $pngData.Dispose()
