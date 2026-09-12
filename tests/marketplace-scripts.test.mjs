@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,13 +9,16 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const pluginName = "codex-claude-code-bridge";
 
-async function fixture(context) {
-  const home = await mkdtemp(path.join(os.tmpdir(), "bridge-marketplace-test-"));
-  context.after(() => rm(home, { recursive: true, force: true }));
+async function fixture(context, aliasedHome = false) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-marketplace-test-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const home = path.join(root, "profile");
   const scripts = path.join(home, "plugins", pluginName, "scripts");
   const marketplacePath = path.join(home, ".agents", "plugins", "marketplace.json");
   await mkdir(scripts, { recursive: true });
   await mkdir(path.dirname(marketplacePath), { recursive: true });
+  const effectiveHome = aliasedHome ? path.join(root, "profile-alias") : home;
+  if (aliasedHome) await symlink(home, effectiveHome, process.platform === "win32" ? "junction" : "dir");
   for (const name of ["register", "unregister"]) {
     await copyFile(new URL(`../scripts/${name}-personal-marketplace.mjs`, import.meta.url),
       path.join(scripts, `${name}-personal-marketplace.mjs`));
@@ -24,7 +27,7 @@ async function fixture(context) {
     marketplacePath,
     run: (name, ...args) => execFileAsync(process.execPath,
       [path.join(scripts, `${name}-personal-marketplace.mjs`), ...args],
-      { env: { ...process.env, HOME: home, USERPROFILE: home }, windowsHide: true }),
+      { env: { ...process.env, HOME: effectiveHome, USERPROFILE: effectiveHome }, windowsHide: true }),
   };
 }
 
@@ -57,6 +60,15 @@ test("registration creates a personal marketplace when none exists", async (cont
   const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
   assert.equal(marketplace.name, "personal");
   assert.deepEqual(marketplace.plugins[0].policy, { installation: "AVAILABLE", authentication: "ON_INSTALL" });
+});
+
+test("registration accepts the expected repository through a home-directory alias", async (context) => {
+  const { marketplacePath, run } = await fixture(context, true);
+  await run("register");
+  const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
+  assert.equal(marketplace.plugins[0].name, pluginName);
+  await run("unregister", "--yes");
+  assert.deepEqual(JSON.parse(await readFile(marketplacePath, "utf8")).plugins, []);
 });
 
 test("marketplace scripts reject malformed JSON and invalid identifiers without changing the file", async (context) => {

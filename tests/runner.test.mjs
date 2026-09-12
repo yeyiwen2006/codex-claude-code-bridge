@@ -66,7 +66,10 @@ test("ignores relative PATH entries when locating Claude Code", async () => {
   } finally {
     process.chdir(originalDirectory);
   }
-  assert.equal(getCommandConfiguration({ PATH: temporaryDirectory }).command, await realpath(executable));
+  const resolvedExecutable = getCommandConfiguration({ PATH: temporaryDirectory }).command;
+  assert.equal(path.isAbsolute(resolvedExecutable), true);
+  // Native realpath resolves Windows short-name aliases on both sides.
+  assert.equal(await realpath(resolvedExecutable), await realpath(executable));
 });
 
 test("builds native bypass arguments without bridge tool or network denials", async () => {

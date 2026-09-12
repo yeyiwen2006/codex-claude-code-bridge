@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,12 +11,12 @@ const pluginRoot = path.resolve(scriptDirectory, "..");
 const expectedPluginRoot = path.join(os.homedir(), "plugins", PLUGIN_NAME);
 const marketplacePath = path.join(os.homedir(), ".agents", "plugins", "marketplace.json");
 
-function comparable(value) {
-  const resolved = path.resolve(value);
+async function comparable(value) {
+  const resolved = await realpath(value).catch(() => path.resolve(value));
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-if (comparable(pluginRoot) !== comparable(expectedPluginRoot)) {
+if (await comparable(pluginRoot) !== await comparable(expectedPluginRoot)) {
   process.stderr.write(
     `This registration script expects the repository at:\n${expectedPluginRoot}\n\nCurrent location:\n${pluginRoot}\n\nClone or move the repository to the expected location, then run this script again.\n`,
   );

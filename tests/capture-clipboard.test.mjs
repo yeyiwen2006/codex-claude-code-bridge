@@ -46,7 +46,9 @@ try {
     const result = await executeProcess(
       path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", runner, "-HelperPath", helper, "-FixturePath", fixture],
-      { timeoutMs: 5000 },
+      // Hosted Windows runners can need more than five seconds for a cold
+      // PowerShell/.NET start while the test suite is running in parallel.
+      { timeoutMs: 30_000 },
     );
     assert.equal(result.exitCode, 0, result.stderr);
     return { destination, result: JSON.parse(result.stdout) };

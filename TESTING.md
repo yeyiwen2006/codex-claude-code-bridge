@@ -6,13 +6,15 @@
 
 本机为 Windows，Node.js 24.19.0、Claude Code 2.1.261、Codex CLI 0.153.4。自动化测试使用模拟 Claude 进程、临时项目、隔离的插件状态和剪贴板夹具。真实调用使用 DeepSeek 官方 Anthropic 兼容接口与 `deepseek-flash[1m]`，只处理专用测试目录中的固定内容。
 
-完整检查共 125 项，全部通过，无失败或跳过。检查包含 JavaScript 语法、插件结构、版本一致性和 UTF-8 编码。插件技能提供的独立清单校验器也通过。代码经过分工审查和交叉审查，没有执行哈希检验。
+完整检查共 126 项，全部通过，无失败或跳过。检查包含 JavaScript 语法、插件结构、版本一致性和 UTF-8 编码。插件技能提供的独立清单校验器也通过。代码经过分工审查和交叉审查，没有执行哈希检验。
 
 ```powershell
 npm run check
 ```
 
 GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12 个组合。非 Windows 环境跳过 Windows 清单入口和原生剪贴板助手的两项测试，其余照常运行。对应提交的运行结果见 [GitHub CI](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/workflows/ci.yml)。
+
+首轮 CI 暴露了 macOS 目录别名导致注册位置误判的问题，注册脚本已改为比较真实目录，并补充目录别名回归。Windows 新增路径测试也改为统一长短文件名后比较；剪贴板助手测试为 PowerShell 冷启动预留 30 秒，保留原有功能断言，生产捕获超时未调整。
 
 ## 本轮发现并修复的问题
 

@@ -12,7 +12,7 @@ Release preparation completed on 2026-09-12. No tag or GitHub Release was create
 - Isolate clipboard captures by batch so failed captures can be removed without disturbing existing images. Check file-drop quantity and size before copying and limit PNG stream writes.
 - Strip recognized host preambles from mixed conversation records. Reject inherited object property names in configuration reset commands.
 - Forward explicit provider model names and aliases through the MCP environment and restricted runner, including `ANTHROPIC_MODEL`, the three `ANTHROPIC_DEFAULT_*_MODEL` variables, and `CLAUDE_CODE_SUBAGENT_MODEL`.
-- Reject invalid personal marketplace identifiers without changing the file. Detect UTF-8 BOMs correctly and preserve Chinese text in the encoding checks.
+- Reject invalid personal marketplace identifiers without changing the file. Compare canonical installation directories so home-directory aliases work on macOS and Windows. Detect UTF-8 BOMs correctly and preserve Chinese text in the encoding checks.
 - Read both MCP server versions from the package version. Extend CI to Node.js 24 while retaining the existing Node.js 18, 20 and 22 matrix.
 
-Validation includes 125 local automated tests, independent plugin manifest validation, and real DeepSeek calls through Claude Code for reading, writing, both approval transports, explicit plugin Skill execution, session resumption and session forking. See [the test record](./TESTING.md) for methods and remaining UI and platform limits.
+Validation includes 126 local automated tests, independent plugin manifest validation, and real DeepSeek calls through Claude Code for reading, writing, both approval transports, explicit plugin Skill execution, session resumption and session forking. See [the test record](./TESTING.md) for methods and remaining UI and platform limits.
