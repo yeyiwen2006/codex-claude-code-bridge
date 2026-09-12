@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { approvalText, cancelClaudeJob, describeClaudeJob, resolveClaudeApproval, startClaudeJob } from "../server/lib/claude-job-manager.mjs";
+import { approvalText, cancelClaudeJob, describeClaudeJob, readClaudeJobResult, resolveClaudeApproval, startClaudeJob, waitForJobEvent } from "../server/lib/claude-job-manager.mjs";
 import {
   loadSessionState,
   saveSessionState,
@@ -17,6 +17,119 @@ import {
 const sessionId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const jobId = "a1b2c3d4";
 const approvalId = "f0e1d2c3";
+const orphanPid = 2147483647;
+
+async function seedOrphan(dataRoot, overrides = {}) {
+  const specPath = path.join(dataRoot, "jobs", sessionId, `${jobId}.json`);
+  const imageDirectory = path.join(dataRoot, "images", sessionId);
+  const resultDirectory = path.join(dataRoot, "results", sessionId);
+  await Promise.all([
+    mkdir(path.dirname(specPath), { recursive: true }),
+    mkdir(imageDirectory, { recursive: true }),
+    mkdir(resultDirectory, { recursive: true }),
+  ]);
+  const attached = path.join(imageDirectory, "attached.png");
+  const queued = path.join(imageDirectory, "next.png");
+  const oldResult = path.join(resultDirectory, "previous.md");
+  const unfinishedResult = path.join(resultDirectory, `${jobId}.md`);
+  await Promise.all([
+    writeFile(attached, "attached fixture"), writeFile(queued, "next fixture"),
+    writeFile(oldResult, "previous result", "utf8"),
+    writeFile(unfinishedResult, "unconfirmed worker output", "utf8"),
+    writeFile(specPath, JSON.stringify({ request: {
+      taskPrompt: "Write the authorized fixture", authorizationRoot: dataRoot,
+      imageIds: ["attached1"], input: { persistSession: false },
+    } }), "utf8"),
+  ]);
+  await saveSessionState(dataRoot, sessionId, {
+    images: [{ id: "attached1", storedPath: attached }, { id: "queued002", storedPath: queued }],
+    resultFiles: [oldResult], forkNext: true,
+    activeJob: { id: jobId, status: "running", workerPid: orphanPid, cancelRequested: true,
+      pendingApproval: { id: approvalId, toolName: "Write" }, decision: { approvalId, action: "allow" } },
+    ...overrides,
+  });
+  return { specPath, attached, queued, oldResult, unfinishedResult };
+}
+
+function stubOrphanProbe(probe) {
+  const originalKill = process.kill;
+  process.kill = (pid, signal) => pid === orphanPid ? probe(signal) : originalKill(pid, signal);
+  return () => { process.kill = originalKill; };
+}
+
+test("recovers a stopped dead worker, retains unrelated images and exposes the cancelled result", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-cancelled-"));
+  const restore = stubOrphanProbe((signal) => { assert.equal(signal, 0); throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
+  try {
+    const files = await seedOrphan(dataRoot);
+    assert.match(await describeClaudeJob({ dataRoot, sessionId }), /^cancelled/);
+    const state = await loadSessionState(dataRoot, sessionId);
+    assert.equal(state.activeJob.pendingApproval, null);
+    assert.equal(state.activeJob.decision, null);
+    assert.equal(state.forkNext, false);
+    assert.deepEqual(state.images.map((image) => image.id), ["queued002"]);
+    await assert.rejects(access(files.specPath));
+    await assert.rejects(access(files.attached));
+    await access(files.queued);
+    assert.equal(await readFile(files.oldResult, "utf8"), "previous result");
+    assert.equal(await readFile(files.unfinishedResult, "utf8"), "unconfirmed worker output");
+    assert.ok(state.resultFiles.includes(files.unfinishedResult));
+    assert.ok(state.resultFiles.includes(state.activeJob.resultPath));
+    assert.equal(state.bridgeHistory.at(-1).status, "cancelled");
+    const result = await readClaudeJobResult({ dataRoot, sessionId });
+    assert.match(result, /任务已取消/);
+    assert.doesNotMatch(result, /unconfirmed worker output/);
+    assert.equal((await loadSessionState(dataRoot, sessionId)).activeJob, null);
+  } finally { restore(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test("wait polling finalizes an unexpectedly dead worker as failed", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-failed-"));
+  const restore = stubOrphanProbe(() => { throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
+  try {
+    await seedOrphan(dataRoot, { activeJob: { id: jobId, status: "waiting", workerPid: orphanPid, cancelRequested: false } });
+    const text = await waitForJobEvent(dataRoot, sessionId, jobId, 0);
+    assert.match(text, /任务失败/);
+    const state = await loadSessionState(dataRoot, sessionId);
+    assert.equal(state.activeJob, null);
+    assert.equal(state.bridgeHistory.at(-1).status, "failed");
+  } finally { restore(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test("dead-worker recovery respects SessionEnd cleanup without recreating the session", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-ended-"));
+  const restore = stubOrphanProbe(() => { throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
+  try {
+    const files = await seedOrphan(dataRoot, { sessionEnded: true });
+    assert.equal(await describeClaudeJob({ dataRoot, sessionId }), "无");
+    for (const file of [...Object.values(files), path.join(dataRoot, "state", "sessions", `${sessionId}.json`)]) {
+      await assert.rejects(access(file));
+    }
+    assert.deepEqual(await readdir(path.join(dataRoot, "results")), []);
+  } finally { restore(); await rm(dataRoot, { recursive: true, force: true }); }
+});
+
+test("does not reclaim unregistered, live, inaccessible or reused worker PIDs", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-worker-probe-"));
+  let probe = () => true;
+  const restore = stubOrphanProbe((signal) => { assert.equal(signal, 0); return probe(); });
+  try {
+    for (const workerPid of [null, 0, -1, "1234", process.pid, orphanPid]) {
+      await saveSessionState(dataRoot, sessionId, { activeJob: { id: jobId, status: "starting", workerPid } });
+      assert.match(await describeClaudeJob({ dataRoot, sessionId }), /^starting/);
+    }
+    probe = () => { throw Object.assign(new Error("inaccessible fixture"), { code: "EPERM" }); };
+    assert.match(await describeClaudeJob({ dataRoot, sessionId }), /^starting/);
+    let checks = 0;
+    probe = () => {
+      checks += 1;
+      if (checks === 1) throw Object.assign(new Error("exited fixture"), { code: "ESRCH" });
+      return true;
+    };
+    assert.match(await describeClaudeJob({ dataRoot, sessionId }), /^starting/);
+    assert.equal(checks, 2, "recheck process existence after acquiring the state lock");
+  } finally { restore(); await rm(dataRoot, { recursive: true, force: true }); }
+});
 
 for (const asynchronous of [false, true]) {
 test(`marks a job failed and removes its spec after ${asynchronous ? "asynchronous" : "synchronous"} worker launch failure`, async () => {

@@ -238,3 +238,80 @@ test("failed capture cleanup refuses a session root redirected outside plugin da
     }), /capture interrupted/);
   assert.deepEqual(await readFile(original), PNG_1X1);
 });
+
+test("retries image cleanup when the last directory was removed before state was saved", async () => {
+  const sessionId = "interrupted-final-image-cleanup";
+  const state = { images: [], lastClipboardSequence: null };
+  const [attached] = await addClipboardImages(state, temporaryRoot, sessionId, {
+    captureFunction: async (destination) => {
+      const filePath = path.join(destination, "attached.png");
+      await writeFile(filePath, PNG_1X1);
+      return { clipboardSequence: "104", items: [{ path: filePath }] };
+    },
+  });
+  const persistedState = structuredClone(state);
+  assert.equal(await clearQueuedImages(state, temporaryRoot, sessionId, [attached.id]), 1);
+  await assert.rejects(access(path.join(temporaryRoot, "images", sessionId)), { code: "ENOENT" });
+
+  assert.equal(await clearQueuedImages(persistedState, temporaryRoot, sessionId, [attached.id]), 1);
+  assert.deepEqual(persistedState.images, []);
+  assert.equal(persistedState.lastClipboardSequence, null);
+  assert.equal(await clearQueuedImages(persistedState, temporaryRoot, sessionId, [attached.id]), 0);
+});
+
+test("missing-directory cleanup removes only selected metadata without deleting stored paths", async () => {
+  const dataRoot = path.join(temporaryRoot, "missing-image-directory-data");
+  const sessionId = "missing-image-directory-session";
+  await mkdir(path.join(dataRoot, "images"), { recursive: true });
+  const outsideImage = path.join(temporaryRoot, "unrelated-missing-directory-image.png");
+  await writeFile(outsideImage, PNG_1X1);
+  const queued = { id: "next-image", storedPath: path.join(dataRoot, "images", sessionId, "next.png") };
+  const state = {
+    images: [{ id: "old-image", storedPath: outsideImage }, queued],
+    lastClipboardSequence: "105",
+  };
+
+  assert.equal(await clearQueuedImages(state, dataRoot, sessionId, ["old-image"]), 1);
+  assert.deepEqual(state.images, [queued]);
+  assert.equal(state.lastClipboardSequence, "105");
+  assert.deepEqual(await readFile(outsideImage), PNG_1X1);
+  assert.equal(await clearQueuedImages(state, dataRoot, sessionId), 1);
+  assert.deepEqual(state.images, []);
+  assert.equal(state.lastClipboardSequence, null);
+  await assert.rejects(access(path.join(dataRoot, "images", sessionId)), { code: "ENOENT" });
+});
+
+test("clears an empty queue before its image root exists but refuses a dangling root", async () => {
+  const dataRoot = path.join(temporaryRoot, "empty-uninitialized-image-data");
+  const sessionId = "empty-uninitialized-image-session";
+  await mkdir(dataRoot);
+  const state = { images: [], lastClipboardSequence: "previous-sequence" };
+  assert.equal(await clearQueuedImages(state, dataRoot, sessionId), 0);
+  assert.equal(state.lastClipboardSequence, null);
+  await assert.rejects(access(path.join(dataRoot, "images")), { code: "ENOENT" });
+
+  await symlink(path.join(temporaryRoot, "absent-empty-image-target"), path.join(dataRoot, "images"),
+    process.platform === "win32" ? "junction" : "dir");
+  state.lastClipboardSequence = "unchanged-sequence";
+  await assert.rejects(clearQueuedImages(state, dataRoot, sessionId));
+  assert.deepEqual(state, { images: [], lastClipboardSequence: "unchanged-sequence" });
+});
+
+test("missing-directory cleanup still refuses redirected roots and dangling session links", async () => {
+  for (const level of ["images", "session"]) {
+    const dataRoot = path.join(temporaryRoot, `missing-redirected-${level}-data`);
+    const outside = path.join(temporaryRoot, `missing-redirected-${level}-outside`);
+    const sessionId = "missing-redirected-image-session";
+    await mkdir(dataRoot);
+    const imagesRoot = path.join(dataRoot, "images");
+    if (level === "images") await mkdir(outside);
+    else await mkdir(imagesRoot);
+    await symlink(outside, level === "images" ? imagesRoot : path.join(imagesRoot, sessionId),
+      process.platform === "win32" ? "junction" : "dir");
+    const state = { images: [{ id: "old-image", storedPath: path.join(outside, "image.png") }], lastClipboardSequence: "106" };
+    const originalState = structuredClone(state);
+
+    await assert.rejects(clearQueuedImages(state, dataRoot, sessionId, ["old-image"]), InputError);
+    assert.deepEqual(state, originalState);
+  }
+});

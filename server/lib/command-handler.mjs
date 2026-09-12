@@ -27,6 +27,7 @@ import {
   describeClaudeJob,
   interruptClaudeJob,
   readClaudeJobResult,
+  recoverClaudeJob,
   resolveClaudeApproval,
   startClaudeJob,
 } from "./claude-job-manager.mjs";
@@ -572,6 +573,7 @@ async function cleanupSession(dataRoot, sessionId) {
 async function executeCommand(command, context) {
   // Recovery commands must work even when the stored configuration is invalid.
   if (command.kind === "help") return HELP_TEXT;
+  await context.dependencies.recoverClaudeJob(context);
   switch (command.kind) {
     case "allow":
     case "deny":
@@ -839,6 +841,8 @@ export async function handleHookEvent(input, options = {}) {
   if (input.hook_event_name === "SessionEnd") {
     if (typeof input.session_id === "string") {
       await cleanupSession(dataRoot, input.session_id).catch(() => {});
+      const recover = options.recoverClaudeJob ?? recoverClaudeJob;
+      await recover({ dataRoot, sessionId: input.session_id }).catch(() => {});
       await cleanupHookReceipts(dataRoot, input.session_id).catch(() => {});
     }
     return null;
@@ -880,6 +884,7 @@ export async function handleHookEvent(input, options = {}) {
     startClaudeJob: options.startClaudeJob ?? startClaudeJob,
     describeClaudeJob: options.describeClaudeJob ?? describeClaudeJob,
     readClaudeJobResult: options.readClaudeJobResult ?? readClaudeJobResult,
+    recoverClaudeJob: options.recoverClaudeJob ?? recoverClaudeJob,
     resolveClaudeApproval: options.resolveClaudeApproval ?? resolveClaudeApproval,
     cancelClaudeJob: options.cancelClaudeJob ?? cancelClaudeJob,
   };

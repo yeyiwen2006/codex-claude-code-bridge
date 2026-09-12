@@ -18,6 +18,79 @@ import { normalizeRunInput } from "../server/lib/validation.mjs";
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const mockClaude = path.join(testDirectory, "fixtures", "mock-claude.mjs");
 
+test("a normal run recovers a dead cancelled worker before preparing the next request", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-run-after-dead-worker-"));
+  const sessionId = "recover-before-run-session";
+  const oldJobId = "dead1234";
+  const oldWorkerPid = 2147483647;
+  const originalKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === oldWorkerPid) throw Object.assign(new Error("fixture process exited"), { code: "ESRCH" });
+    return originalKill(pid, signal);
+  };
+  try {
+    const specDirectory = path.join(dataRoot, "jobs", sessionId);
+    await mkdir(specDirectory, { recursive: true });
+    await writeFile(path.join(specDirectory, `${oldJobId}.json`), JSON.stringify({ request: {
+      taskPrompt: "The interrupted task", authorizationRoot: dataRoot, imageIds: [],
+    } }), "utf8");
+    await saveSessionState(dataRoot, sessionId, {
+      authorization: { root: dataRoot, expiresAt: Date.now() + 60_000 },
+      activeJob: { id: oldJobId, status: "running", workerPid: oldWorkerPid, cancelRequested: true },
+    });
+    const response = await handleHookEvent({
+      hook_event_name: "UserPromptSubmit", session_id: sessionId, cwd: dataRoot,
+      prompt: "claude run -- NEXT_AFTER_STOP",
+    }, { environment: { ...mockEnvironment(), PLUGIN_DATA: dataRoot } });
+    assert.equal(response.decision, "block");
+    assert.match(response.reason, /mock:.*NEXT_AFTER_STOP/s);
+    const state = await loadSessionState(dataRoot, sessionId);
+    assert.equal(state.activeJob, null);
+    assert.equal(state.bridgeHistory.find((entry) => entry.id === oldJobId).status, "cancelled");
+    assert.equal(state.bridgeHistory.at(-1).status, "completed");
+    assert.match(response.reason, /The interrupted task/);
+  } finally {
+    process.kill = originalKill;
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test("SessionEnd reclaims an already dead worker and removes its private artifacts", async () => {
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-session-end-dead-worker-"));
+  const sessionId = "session-end-dead-worker";
+  const jobId = "dead5678";
+  const workerPid = 2147483647;
+  const originalKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === workerPid) throw Object.assign(new Error("fixture process exited"), { code: "ESRCH" });
+    return originalKill(pid, signal);
+  };
+  try {
+    const specPath = path.join(dataRoot, "jobs", sessionId, `${jobId}.json`);
+    const imagePath = path.join(dataRoot, "images", sessionId, "attached.png");
+    const resultPath = path.join(dataRoot, "results", sessionId, `${jobId}.md`);
+    await Promise.all([specPath, imagePath, resultPath].map((file) => mkdir(path.dirname(file), { recursive: true })));
+    await Promise.all([
+      writeFile(specPath, JSON.stringify({ request: { taskPrompt: "Interrupted fixture", authorizationRoot: dataRoot, imageIds: ["deadimg1"] } }), "utf8"),
+      writeFile(imagePath, "private image fixture"), writeFile(resultPath, "unconfirmed result", "utf8"),
+    ]);
+    await saveSessionState(dataRoot, sessionId, {
+      activeJob: { id: jobId, status: "running", workerPid, cancelRequested: false },
+      images: [{ id: "deadimg1", storedPath: imagePath }], resultFiles: [resultPath],
+    });
+    assert.equal(await handleHookEvent({ hook_event_name: "SessionEnd", session_id: sessionId, cwd: dataRoot }, {
+      environment: { ...process.env, PLUGIN_DATA: dataRoot },
+    }), null);
+    for (const file of [specPath, imagePath, resultPath, path.join(dataRoot, "state", "sessions", `${sessionId}.json`)]) {
+      await assert.rejects(access(file));
+    }
+    await assert.rejects(access(path.join(dataRoot, "results", sessionId, `${jobId}.recovered.md`)));
+  } finally {
+    process.kill = originalKill;
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test("a worker cancelled before startup does not attempt to resolve Claude", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-prestart-cancel-"));
   const sessionId = "prestart-cancel-session";

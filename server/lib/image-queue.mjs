@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readdir, realpath, rmdir, stat, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, realpath, rmdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { executeProcess } from "./claude-runner.mjs";
@@ -27,6 +27,16 @@ async function privateImageDirectory(dataRoot, directory) {
     }
   }
   return canonicalDirectory;
+}
+
+async function directoryEntryIsMissing(directory) {
+  try {
+    await lstat(directory);
+    return false;
+  } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    throw error;
+  }
 }
 
 function windowsPowerShellPath(environment) {
@@ -208,18 +218,34 @@ export async function addClipboardImages(state, dataRoot, sessionId, options = {
 
 export async function clearQueuedImages(state, dataRoot, sessionId, selectedIds) {
   const destination = sessionImageDirectory(dataRoot, sessionId);
+  const selected = selectedIds === undefined ? null : new Set(selectedIds);
   let canonicalDestination;
   try {
     canonicalDestination = await privateImageDirectory(dataRoot, destination);
   } catch (error) {
     if (error instanceof InputError) throw error;
-    if (state.images.length === 0 && error && typeof error === "object" && error.code === "ENOENT") {
-      state.lastClipboardSequence = null;
-      return 0;
+    if (error?.code === "ENOENT") {
+      const imagesRoot = path.dirname(destination);
+      if (state.images.length === 0) {
+        await realpath(dataRoot);
+        if (await directoryEntryIsMissing(imagesRoot)) {
+          state.lastClipboardSequence = null;
+          return 0;
+        }
+      }
+      // A worker can remove the last image directory before its state update.
+      // Only discard stale metadata after validating the parent and confirming
+      // the directory entry itself is absent, rather than a dangling link.
+      await privateImageDirectory(dataRoot, imagesRoot);
+      if (await directoryEntryIsMissing(destination)) {
+        const previousCount = state.images.length;
+        state.images = selected === null ? [] : state.images.filter((image) => !selected.has(image.id));
+        if (state.images.length === 0) state.lastClipboardSequence = null;
+        return previousCount - state.images.length;
+      }
     }
     throw new InputError("The private session image directory is unavailable; refusing to remove queued paths.");
   }
-  const selected = selectedIds === undefined ? null : new Set(selectedIds);
   const kept = [];
   let removed = 0;
   for (const image of state.images) {

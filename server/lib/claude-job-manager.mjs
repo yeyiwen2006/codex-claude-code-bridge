@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { recordBridgeExchange } from "./bridge-history.mjs";
+import { clearQueuedImages } from "./image-queue.mjs";
 import {
   loadSessionState,
+  removeSessionState,
   saveSessionState,
   sessionLockName,
   withStateLock,
@@ -40,6 +43,77 @@ function jobDirectory(dataRoot, sessionId) {
 
 function jobSpecPath(dataRoot, sessionId, jobId) {
   return path.join(jobDirectory(dataRoot, sessionId), `${jobId}.json`);
+}
+
+function workerIsDefinitelyGone(job) {
+  if (!activeStatus(job) || !Number.isSafeInteger(job.workerPid) || job.workerPid <= 0
+    || typeof job.id !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(job.id)) return false;
+  try {
+    process.kill(job.workerPid, 0);
+    // A live or reused PID is never evidence that this job can be reclaimed.
+    return false;
+  } catch (error) {
+    return error?.code === "ESRCH";
+  }
+}
+
+export async function recoverClaudeJob({ dataRoot, sessionId }) {
+  const observed = await loadSessionState(dataRoot, sessionId);
+  if (!workerIsDefinitelyGone(observed.activeJob)) return observed;
+  return withStateLock(dataRoot, sessionLockName(sessionId), async () => {
+    const state = await loadSessionState(dataRoot, sessionId);
+    const job = state.activeJob;
+    if (job?.id !== observed.activeJob.id || job.workerPid !== observed.activeJob.workerPid
+      || job.createdAt !== observed.activeJob.createdAt || !workerIsDefinitelyGone(job)) return state;
+    const specPath = jobSpecPath(dataRoot, sessionId, job.id);
+    let request;
+    try { request = JSON.parse(await readFile(specPath, "utf8")).request; } catch { /* The worker may have removed its spec before exiting. */ }
+    const imageIds = Array.isArray(request?.imageIds) ? request.imageIds : job.imageIds;
+    if (Array.isArray(imageIds) && imageIds.length > 0) {
+      await clearQueuedImages(state, dataRoot, sessionId, imageIds);
+    }
+    const cancelled = job.cancelRequested || state.sessionEnded;
+    const message = "后台进程已退出，未能写入任务终态。";
+    const text = `Claude Code 任务${cancelled ? "已取消" : "失败"}：${message}`;
+    const resultDirectory = path.join(dataRoot, "results", sessionId);
+    // Keep any output written just before the worker died, but do not mistake
+    // it for a confirmed successful result. Track it for SessionEnd cleanup.
+    const unfinishedResult = path.join(resultDirectory, `${job.id}.md`);
+    const resultPath = path.join(resultDirectory, `${job.id}.recovered.md`);
+    await mkdir(resultDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(resultPath, text, { encoding: "utf8", mode: 0o600 });
+    for (const storedPath of [unfinishedResult, resultPath]) {
+      if (!state.resultFiles.includes(storedPath)) state.resultFiles.push(storedPath);
+    }
+    job.status = cancelled ? "cancelled" : "failed";
+    job.pendingApproval = null;
+    job.decision = null;
+    job.resultPath = resultPath;
+    job.error = message;
+    job.updatedAt = Date.now();
+    state.forkNext = false;
+    if (request && typeof request === "object") {
+      recordBridgeExchange(state, request, { id: job.id, status: job.status, text });
+    }
+    if (state.sessionEnded) {
+      await clearQueuedImages(state, dataRoot, sessionId);
+      for (const storedResult of state.resultFiles) {
+        const resolved = path.resolve(storedResult);
+        if (resolved.startsWith(`${path.resolve(resultDirectory)}${path.sep}`)) {
+          await unlink(resolved).catch(() => {});
+        }
+      }
+      await removeSessionState(dataRoot, sessionId);
+      await rmdir(resultDirectory).catch(() => {});
+      state.activeJob = null;
+    } else {
+      await saveSessionState(dataRoot, sessionId, state);
+    }
+    // Publish the terminal state before removing recovery inputs so an
+    // interrupted recovery can retry with the original prompt and image IDs.
+    await unlink(specPath).catch(() => {});
+    return state;
+  });
 }
 
 function spawnWorker(dataRoot, sessionId, jobId, environment) {
@@ -132,7 +206,7 @@ async function consumeCompletedJob(dataRoot, sessionId, job) {
 export async function waitForJobEvent(dataRoot, sessionId, jobId, waitMs = EVENT_WAIT_MS) {
   const deadline = Date.now() + waitMs;
   while (true) {
-    const state = await loadSessionState(dataRoot, sessionId);
+    const state = await recoverClaudeJob({ dataRoot, sessionId });
     const job = state.activeJob;
     if (!job || job.id !== jobId) {
       return "Claude Code 任务状态已不存在；它可能已被清理。";
@@ -151,6 +225,7 @@ export async function waitForJobEvent(dataRoot, sessionId, jobId, waitMs = EVENT
 }
 
 export async function startClaudeJob(request, context) {
+  await recoverClaudeJob(context);
   const jobId = randomUUID().replaceAll("-", "").slice(0, 8);
   const directory = jobDirectory(context.dataRoot, context.sessionId);
   const specPath = jobSpecPath(context.dataRoot, context.sessionId, jobId);
@@ -173,6 +248,7 @@ export async function startClaudeJob(request, context) {
         updatedAt: Date.now(),
         permissionMode: request.input.permissionMode,
         timeoutSeconds: request.input.timeoutSeconds,
+        imageIds: request.imageIds ?? [],
         workerPid: null,
         pendingApproval: null,
         decision: null,
@@ -216,7 +292,7 @@ export async function startClaudeJob(request, context) {
 }
 
 export async function describeClaudeJob(context) {
-  const state = await loadSessionState(context.dataRoot, context.sessionId);
+  const state = await recoverClaudeJob(context);
   const job = state.activeJob;
   if (!job) return "无";
   if (activeStatus(job) && job.cancelRequested) return `正在取消（任务 ${job.id}）`;
@@ -228,7 +304,7 @@ export async function describeClaudeJob(context) {
 }
 
 export async function readClaudeJobResult(context) {
-  const state = await loadSessionState(context.dataRoot, context.sessionId);
+  const state = await recoverClaudeJob(context);
   if (!state.activeJob) return "当前没有 Claude Code 任务。";
   if (["completed", "failed", "cancelled"].includes(state.activeJob.status)) {
     return consumeCompletedJob(context.dataRoot, context.sessionId, state.activeJob);
@@ -237,6 +313,7 @@ export async function readClaudeJobResult(context) {
 }
 
 export async function resolveClaudeApproval(command, context) {
+  await recoverClaudeJob(context);
   const resumed = await mutateSession(context.dataRoot, context.sessionId, async (state) => {
     const job = state.activeJob;
     if (
