@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +19,7 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const mockClaude = path.join(testDirectory, "fixtures", "mock-claude.mjs");
 
 test("a normal run recovers a dead cancelled worker before preparing the next request", async () => {
-  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-run-after-dead-worker-"));
+  const dataRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bridge-run-after-dead-worker-")));
   const sessionId = "recover-before-run-session";
   const oldJobId = "dead1234";
   const oldWorkerPid = 2147483647;
@@ -56,7 +56,7 @@ test("a normal run recovers a dead cancelled worker before preparing the next re
 });
 
 test("SessionEnd reclaims an already dead worker and removes its private artifacts", async () => {
-  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-session-end-dead-worker-"));
+  const dataRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bridge-session-end-dead-worker-")));
   const sessionId = "session-end-dead-worker";
   const jobId = "dead5678";
   const workerPid = 2147483647;

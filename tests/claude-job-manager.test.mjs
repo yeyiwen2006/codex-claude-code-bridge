@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
@@ -58,7 +58,7 @@ function stubOrphanProbe(probe) {
 }
 
 test("recovers a stopped dead worker, retains unrelated images and exposes the cancelled result", async () => {
-  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-cancelled-"));
+  const dataRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bridge-dead-cancelled-")));
   const restore = stubOrphanProbe((signal) => { assert.equal(signal, 0); throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
   try {
     const files = await seedOrphan(dataRoot);
@@ -84,7 +84,7 @@ test("recovers a stopped dead worker, retains unrelated images and exposes the c
 });
 
 test("wait polling finalizes an unexpectedly dead worker as failed", async () => {
-  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-failed-"));
+  const dataRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bridge-dead-failed-")));
   const restore = stubOrphanProbe(() => { throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
   try {
     await seedOrphan(dataRoot, { activeJob: { id: jobId, status: "waiting", workerPid: orphanPid, cancelRequested: false } });
@@ -97,7 +97,7 @@ test("wait polling finalizes an unexpectedly dead worker as failed", async () =>
 });
 
 test("dead-worker recovery respects SessionEnd cleanup without recreating the session", async () => {
-  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "bridge-dead-ended-"));
+  const dataRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bridge-dead-ended-")));
   const restore = stubOrphanProbe(() => { throw Object.assign(new Error("dead fixture"), { code: "ESRCH" }); });
   try {
     const files = await seedOrphan(dataRoot, { sessionEnded: true });
