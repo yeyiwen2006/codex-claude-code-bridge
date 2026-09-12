@@ -2,7 +2,7 @@
 
 ## 0.3.6
 
-Release preparation updated on 2026-09-12. No tag or GitHub Release was created as part of this validation. Desktop verification after restarting the App and live system clipboard capture remain pending.
+Release preparation updated on 2026-09-12. No tag or GitHub Release was created as part of this validation. Desktop verification after restarting the App passed; live system clipboard capture remains pending.
 
 - Keep the permission MCP responsive during pending approvals. Cancellation clears the current request, queued approvals remain serialized, and terminal jobs cannot be revived by late decisions.
 - Handle synchronous and asynchronous worker launch failures, remove unused task input, and honor cancellation before Claude starts. Support locking sessions with the maximum accepted ID length.
@@ -18,4 +18,4 @@ Release preparation updated on 2026-09-12. No tag or GitHub Release was created 
 - Reject invalid personal marketplace identifiers without changing the file. Compare canonical installation directories so home-directory aliases work on macOS and Windows. Detect UTF-8 BOMs correctly and preserve Chinese text in the encoding checks.
 - Read both MCP server versions from the package version. Extend CI to Node.js 24 while retaining the existing Node.js 18, 20 and 22 matrix.
 
-Validation includes 136 local automated tests, independent plugin manifest validation, and real DeepSeek calls through Claude Code for reading, writing, images, both approval transports, explicit plugin Skill execution, session resumption and session forking. Real Codex host tests also cover interruption, dead-worker recovery, a successful subsequent write and exit cleanup. See [the test record](./TESTING.md) for methods and remaining UI and platform limits.
+Validation includes 136 local automated tests, independent plugin manifest validation, and real DeepSeek calls through Claude Code for reading, writing, images, both approval transports, explicit plugin Skill execution, session resumption and session forking. Real Codex host tests also cover interruption, dead-worker recovery, a successful subsequent write and exit cleanup. After restarting the App, its actual desktop interface passed command interception, Stop, recovery, a new task and manual write approval. See [the test record](./TESTING.md) for methods and remaining platform limits.
