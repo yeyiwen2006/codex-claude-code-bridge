@@ -1,0 +1,48 @@
+name: Release host validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-host-validation
+  cancel-in-progress: false
+
+jobs:
+  real-host:
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install fixed host and Claude versions
+        run: npm install --global @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.261
+      - name: Real host, permissions, interruption, and cleanup
+        env:
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.BRIDGE_RELEASE_DEEPSEEK_API_KEY }}
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_MODEL: deepseek-flash[1m]
+          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-flash[1m]
+          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-flash[1m]
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-flash[1m]
+          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-flash[1m]
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          DISABLE_TELEMETRY: "1"
+        run: node scripts/qa/cross-platform-host.mjs
+      - name: Upload sanitized validation summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-host-${{ matrix.os }}
+          path: artifacts/release-host-*.json
+          if-no-files-found: error
+          retention-days: 14
