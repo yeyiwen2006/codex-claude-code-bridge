@@ -12,9 +12,9 @@
 npm run check
 ```
 
-GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12 个组合。非 Windows 环境跳过 Windows 清单入口和原生剪贴板助手的两项测试，其余照常运行。PowerShell 修复后的 [12 个组合均通过](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34681292263)，最终提交的运行结果见 [GitHub CI](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/workflows/ci.yml)。
+GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12 个组合。非 Windows 环境跳过 Windows 清单入口和原生剪贴板助手的两项测试，其余照常运行。最终代码及夹具修复后的 [12 个组合均通过](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/runs/34683107791)，后续文档提交的运行结果见 [GitHub CI](https://github.com/yeyiwen2006/codex-claude-code-bridge/actions/workflows/ci.yml)。
 
-首轮 CI 暴露了 macOS 目录别名导致注册位置误判的问题，注册脚本已改为比较真实目录，并补充目录别名回归。Windows 新增路径测试也改为统一长短文件名后比较。剪贴板测试在云端曾超时，增加阶段日志后确认 PowerShell 已进入脚本，阻塞发生在夹具读取所触发的模块加载环节；后续修复直接读取夹具，并明确加载系统自带模块，避免自动搜索其他模块目录。生产捕获超时未调整。
+首轮 CI 暴露了 macOS 目录别名导致注册位置误判的问题，注册脚本已改为比较真实目录，并补充目录别名回归。Windows 新增路径测试也改为统一长短文件名后比较。新增任务恢复夹具后来也因未保存规范路径而失败，现已与生产授权和图片入口保持一致，并在 Windows junction 别名目录中通过定向测试。剪贴板测试在云端曾超时，增加阶段日志后确认 PowerShell 已进入脚本，阻塞发生在夹具读取所触发的模块加载环节；后续修复直接读取夹具，并明确加载系统自带模块，避免自动搜索其他模块目录。生产捕获超时未调整。
 
 ## 本轮发现并修复的问题
 
@@ -52,6 +52,7 @@ GitHub CI 覆盖 Windows、Ubuntu、macOS 与 Node.js 18、20、22、24，共 12
 | 原生会话续接 | 关闭桥接器对话继承后，仍通过同一 Claude 会话 ID 复述上一轮标记 |
 | 原生会话分叉 | 产生新的 Claude 会话 ID，并正确继承此前标记 |
 | 本地安装 | 使用 0.3.6 的独立缓存版本重新安装成功；公开源清单保留纯版本号 |
+| 最终安装的恢复入口 | 使用最终安装代码的正常 Hook 状态入口，将此前桌面测试遗留的取消中任务恢复为 cancelled；没有直接编辑会话状态文件 |
 | 实际 Codex CLI Hook | `claude help` 被拦截，CLI 报告宿主输入和输出 token 均为 0 |
 | 持久 Codex 宿主 | 同一 app-server 会话连续 11 个回合完成授权、配置、自动写入、手动 Write 审批、批准恢复、取消和退出清理；无宿主模型调用项或 token 事件 |
 | 最终代码的宿主停止与恢复 | 在新启动的隔离 app-server 中，真实 interrupt 自然终止 worker，无进程终止注入；status 收敛为 cancelled，result 可读，再次 run 成功写入 `HOST_AFTER_INTERRUPT_OK 中文`；退出后状态、任务输入、结果、图片及回执均已清理 |
